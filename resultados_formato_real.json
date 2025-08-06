@@ -1,0 +1,80 @@
+{
+  "exito": true,
+  "banco_detectado": "bbva",
+  "total_movimientos": 8,
+  "tiempo_procesamiento": 0.0,
+  "movimientos": [
+    {
+      "fecha": "2025-05-01",
+      "concepto": "BALANCE INICIAL LIQUIDACION ADQUIRENTE CREDITO",
+      "monto": "165.00",
+      "tipo": "abono",
+      "referencia": "3407784114",
+      "saldo": "44432.09",
+      "pagina_origen": 1
+    },
+    {
+      "fecha": "2025-05-02",
+      "concepto": "TASA DE DESCTO CREDITO",
+      "monto": "4.60",
+      "tipo": "abono",
+      "referencia": "3407784117",
+      "saldo": "44592.49",
+      "pagina_origen": 1
+    },
+    {
+      "fecha": "2025-05-02",
+      "concepto": "IVA TASA DE DESCTO CREDITO",
+      "monto": "0.74",
+      "tipo": "abono",
+      "referencia": "3407784117",
+      "saldo": "44591.75",
+      "pagina_origen": 1
+    },
+    {
+      "fecha": "2025-05-02",
+      "concepto": "LIQUIDACION ADQUIRENTE DEBITO",
+      "monto": "1050.00",
+      "tipo": "cargo",
+      "referencia": "3407784123",
+      "saldo": "45641.75",
+      "pagina_origen": 1
+    },
+    {
+      "fecha": "2025-05-02",
+      "concepto": "TASA DE DESCTO DEBITO",
+      "monto": "22.48",
+      "tipo": "cargo",
+      "referencia": "3407784128",
+      "saldo": "45619.27",
+      "pagina_origen": 1
+    },
+    {
+      "fecha": "2025-05-02",
+      "concepto": "IVA TASA DE DESCTO DEBITO",
+      "monto": "3.60",
+      "tipo": "cargo",
+      "referencia": "3407784128",
+      "saldo": "45615.67",
+      "pagina_origen": 1
+    },
+    {
+      "fecha": "2025-05-02",
+      "concepto": "DEPOSITO TEF",
+      "monto": "472.46",
+      "tipo": "abono",
+      "referencia": "3408029858",
+      "saldo": "46088.13",
+      "pagina_origen": 1
+    },
+    {
+      "fecha": "2025-05-05",
+      "concepto": "LIQUIDACION ADQUIRENTE DEBITO",
+      "monto": "1115.00",
+      "tipo": "cargo",
+      "referencia": "3411389231",
+      "saldo": "47203.13",
+      "pagina_origen": 1
+    }
+  ]
+}

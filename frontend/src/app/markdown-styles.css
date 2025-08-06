@@ -1,0 +1,240 @@
+/* Estilos avanzados para Markdown */
+
+/* Estilos para bloques de código con syntax highlighting */
+.prose pre {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+  overflow-x: auto;
+  font-family: var(--font-jetbrains-mono), 'Fira Code', 'Monaco', 'Consolas', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  border: 1px solid #334155;
+}
+
+/* Estilos para código inline */
+.prose code:not(pre code) {
+  background: #f1f5f9 !important;
+  color: #dc2626 !important;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-family: var(--font-jetbrains-mono), 'Fira Code', 'Monaco', 'Consolas', monospace;
+  border: 1px solid #e2e8f0;
+}
+
+/* Estilos para títulos */
+.prose h1 {
+  color: #111827 !important;
+  font-size: 1.5rem !important;
+  font-weight: 700 !important;
+  margin-bottom: 1rem !important;
+  margin-top: 1.5rem !important;
+  border-bottom: 2px solid #e5e7eb;
+  padding-bottom: 0.5rem;
+}
+
+.prose h2 {
+  color: #111827 !important;
+  font-size: 1.25rem !important;
+  font-weight: 600 !important;
+  margin-bottom: 0.75rem !important;
+  margin-top: 1.25rem !important;
+}
+
+.prose h3 {
+  color: #111827 !important;
+  font-size: 1.125rem !important;
+  font-weight: 600 !important;
+  margin-bottom: 0.5rem !important;
+  margin-top: 1rem !important;
+}
+
+/* Estilos para párrafos */
+.prose p {
+  color: #374151 !important;
+  line-height: 1.7 !important;
+  margin-bottom: 1rem !important;
+}
+
+/* Estilos para listas */
+.prose ul {
+  list-style-type: disc !important;
+  padding-left: 1.5rem !important;
+  margin-bottom: 1rem !important;
+}
+
+.prose ol {
+  list-style-type: decimal !important;
+  padding-left: 1.5rem !important;
+  margin-bottom: 1rem !important;
+}
+
+.prose li {
+  color: #374151 !important;
+  margin-bottom: 0.25rem !important;
+}
+
+/* Estilos para blockquotes */
+.prose blockquote {
+  border-left: 4px solid #3b82f6 !important;
+  padding-left: 1rem !important;
+  margin: 1rem 0 !important;
+  font-style: italic !important;
+  color: #6b7280 !important;
+  background: #f8fafc;
+  padding: 1rem;
+  border-radius: 0 8px 8px 0;
+}
+
+/* Estilos para enlaces */
+.prose a {
+  color: #2563eb !important;
+  text-decoration: underline !important;
+  text-decoration-color: #dbeafe !important;
+  transition: all 0.2s ease;
+}
+
+.prose a:hover {
+  color: #1d4ed8 !important;
+  text-decoration-color: #3b82f6 !important;
+}
+
+/* Estilos para tablas */
+.prose table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  margin: 1rem 0 !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.prose th {
+  background: #f9fafb !important;
+  color: #111827 !important;
+  font-weight: 600 !important;
+  padding: 0.75rem !important;
+  text-align: left !important;
+  border-bottom: 1px solid #d1d5db !important;
+  border-right: 1px solid #d1d5db !important;
+}
+
+.prose td {
+  padding: 0.75rem !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  border-right: 1px solid #e5e7eb !important;
+  color: #374151 !important;
+}
+
+.prose tr:last-child td {
+  border-bottom: none !important;
+}
+
+.prose td:last-child,
+.prose th:last-child {
+  border-right: none !important;
+}
+
+/* Estilos para líneas horizontales */
+.prose hr {
+  border: none !important;
+  border-top: 1px solid #e5e7eb !important;
+  margin: 2rem 0 !important;
+}
+
+/* Estilos para texto fuerte y énfasis */
+.prose strong {
+  color: #111827 !important;
+  font-weight: 600 !important;
+}
+
+.prose em {
+  color: #374151 !important;
+  font-style: italic !important;
+}
+
+/* Estilos para listas de tareas (checkboxes) */
+.prose input[type="checkbox"] {
+  margin-right: 0.5rem;
+  transform: scale(1.1);
+}
+
+/* Estilos para strikethrough */
+.prose del {
+  color: #9ca3af;
+  text-decoration: line-through;
+}
+
+/* Estilos para subíndices y superíndices */
+.prose sub {
+  font-size: 0.75em;
+  vertical-align: sub;
+}
+
+.prose sup {
+  font-size: 0.75em;
+  vertical-align: super;
+}
+
+/* Estilos para código con syntax highlighting */
+.hljs {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+}
+
+.hljs-keyword {
+  color: #fbbf24 !important;
+}
+
+.hljs-string {
+  color: #34d399 !important;
+}
+
+.hljs-number {
+  color: #f87171 !important;
+}
+
+.hljs-comment {
+  color: #9ca3af !important;
+  font-style: italic;
+}
+
+.hljs-function {
+  color: #60a5fa !important;
+}
+
+.hljs-variable {
+  color: #a78bfa !important;
+}
+
+/* Animaciones suaves */
+.prose * {
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+/* Estilos responsivos */
+@media (max-width: 768px) {
+  .prose {
+    font-size: 0.875rem;
+  }
+  
+  .prose h1 {
+    font-size: 1.25rem;
+  }
+  
+  .prose h2 {
+    font-size: 1.125rem;
+  }
+  
+  .prose h3 {
+    font-size: 1rem;
+  }
+  
+  .prose pre {
+    font-size: 0.75rem;
+    padding: 0.75rem;
+  }
+} 
