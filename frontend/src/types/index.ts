@@ -60,6 +60,8 @@ export interface MovimientoBancario {
   tipo: 'cargo' | 'abono';
   referencia?: string;
   saldo: number | null; // El saldo puede ser null cuando no está disponible en el estado de cuenta
+  cargos?: number | null; // Monto de cargos (egresos)
+  abonos?: number | null; // Monto de abonos (ingresos)
   estado: 'PENDIENTE' | 'CONCILIADO' | 'MANUAL';
   cfdi_uuid?: string;
   nivel_confianza?: number;

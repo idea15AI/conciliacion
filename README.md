@@ -1,40 +1,53 @@
 # Sistema de Conciliación Bancaria
 
-Sistema avanzado de conciliación bancaria que utiliza OCR con OpenAI Vision API para procesar estados de cuenta y conciliar automáticamente con CFDIs existentes.
+Sistema avanzado de conciliación bancaria que utiliza **Google Gemini API** para procesar estados de cuenta bancarios y extraer movimientos automáticamente.
 
 ## 🚀 Características Principales
 
-### ✨ OCR Avanzado
-- **OpenAI Vision API (gpt-4o)** para máxima precisión
-- **Detección automática de bancos mexicanos** (BBVA, Santander, Banamex, etc.)
+### ✨ Procesamiento Inteligente de PDFs
+- **Google Gemini API** para máxima precisión
+- **Detección automática de bancos mexicanos** (BBVA, Santander, Banorte, Inbursa)
 - **Extracción inteligente** de movimientos, fechas, montos y referencias
 - **Validación y limpieza** automática de datos extraídos
 
-### 🎯 Algoritmo de Conciliación Ultra-Preciso
-Implementa **6 estrategias** de conciliación con diferentes niveles de confianza:
+### 🎯 Bancos Soportados
+- **BBVA**: Formato con códigos BNET y SPEI
+- **Santander**: Estados de cuenta PYME
+- **Banorte**: Movimientos con DEPOSITO/RETIRO
+- **Inbursa**: Estados con TASA DE DESCTO y LIQUIDACION
 
-1. **Match Exacto** (95% confianza) - Monto exacto + fecha ±3 días
-2. **Match por Referencia** (90% confianza) - UUID/folio/serie en referencia bancaria
-3. **Match Aproximado** (80% confianza) - Tolerancia configurable en monto y fecha
-4. **Complementos de Pago PPD** (90% confianza) - Suma pagos parciales
-5. **Heurística Combinada** (85% confianza) - Scoring ponderado multifactor
-6. **Patrones ML** (70% confianza) - Análisis de patrones históricos
+### 📊 Interfaz Web Simple
+- **Procesamiento directo** de PDFs bancarios
+- **Visualización de movimientos** en tabla
+- **Descarga de resultados** en JSON
+- **Interfaz minimalista** y fácil de usar
 
-### 📊 Sistema de Alertas y Reportes
-- **Alertas críticas** automáticas para movimientos significativos
-- **Sugerencias inteligentes** para conciliación manual
-- **Estadísticas detalladas** por período y método
-- **Reportes completos** con métricas de calidad
+## ⚡ Uso Rápido
+
+### 1. Iniciar Servidor
+```bash
+uvicorn app.core.main:app --reload --port 8000
+```
+
+### 2. Acceder a la Interfaz
+- Abrir: http://localhost:8000/simple-interface
+- Subir PDF de estado de cuenta bancario
+- Ver movimientos extraídos en tabla
+
+### 3. Usar API Directamente
+```bash
+curl -X POST "http://localhost:8000/api/v1/procesar-pdf/subir?empresa_id=1" \
+  -F "file=@estado_cuenta.pdf"
+```
 
 ## 📦 Instalación
 
 ### 1. Requisitos del Sistema
-- Python 3.11 o superior
-- Node.js 18 o superior (para el frontend)
+- Python 3.9 o superior
 - MySQL 8.0 o superior
-- OpenAI API Key
+- Google Gemini API Key
 
-### 2. Instalar Dependencias Backend
+### 2. Instalar Dependencias
 
 ```bash
 # Instalar usando uv (recomendado)
@@ -44,14 +57,7 @@ uv install
 pip install -r requirements.txt
 ```
 
-### 3. Instalar Dependencias Frontend
-
-```bash
-cd frontend
-npm install
-```
-
-### 4. Configuración de Variables de Entorno
+### 3. Configuración de Variables de Entorno
 
 Crear archivo `.env` basado en el ejemplo:
 
@@ -73,21 +79,16 @@ DB_MSQL_DATABASE=alertadefinitivo
 DB_MSQL_HOST=localhost
 DB_MSQL_PORT=3306
 
-# OpenAI API Key (requerida para OCR)
-OPENAI_API_KEY=tu_clave_openai_aqui
+# Google Gemini API Key (requerida para procesamiento)
+GEMINI_API_KEY=tu_clave_gemini_aqui
 
-# Configuraciones de conciliación
-CONCILIACION_TOLERANCIA_MONTO=1.00
-CONCILIACION_DIAS_TOLERANCIA=3
-CONCILIACION_MAX_FILE_SIZE=52428800
-
-# Configuración de CORS (incluye puertos alternativos)
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:3002,http://127.0.0.1:3002
+# Configuración de CORS
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 ```
 
-**⚠️ IMPORTANTE:** El archivo `.env.example` contiene todas las variables disponibles con comentarios explicativos.
+**⚠️ IMPORTANTE:** Necesitas una API Key de Google Gemini para procesar los PDFs.
 
-### 5. Configurar Base de Datos
+### 4. Configurar Base de Datos
 
 ```bash
 # Crear las tablas necesarias
@@ -96,7 +97,7 @@ python scripts/create_conciliacion_tables.py
 
 ## 🚀 Uso del Sistema
 
-### 1. Iniciar el Backend
+### 1. Iniciar el Servidor
 
 ```bash
 # Usando uv (recomendado)
@@ -106,18 +107,11 @@ uv run uvicorn app.core.main:app --reload --port 8000
 uvicorn app.core.main:app --reload --port 8000
 ```
 
-### 2. Iniciar el Frontend
+### 2. Acceder al Sistema
 
-```bash
-cd frontend
-npm run dev
-```
-
-### 3. Acceder al Sistema
-
-- **Frontend**: http://localhost:3000
+- **Interfaz Web**: http://localhost:8000/simple-interface
 - **API Docs**: http://localhost:8000/docs
-- **API**: http://localhost:8000/api/v1/conciliacion
+- **API**: http://localhost:8000/api/v1/procesar-pdf/subir
 
 ## 📖 Documentación Detallada
 
@@ -127,33 +121,84 @@ Para documentación completa del módulo de conciliación, ver:
 
 ## 🛠️ API Endpoints Principales
 
-### Subir Estado de Cuenta
+### Procesar PDF Bancario
 ```http
-POST /api/v1/conciliacion/subir-estado-cuenta
+POST /api/v1/procesar-pdf/subir?empresa_id=1
 Content-Type: multipart/form-data
 
 # Parámetros:
-# - rfc_empresa: RFC de la empresa (query)
-# - file: Archivo PDF del estado de cuenta
-```
+# - empresa_id: ID de la empresa (query parameter)
+# - file: Archivo PDF del estado de cuenta bancario
 
-### Ejecutar Conciliación
-```http
-POST /api/v1/conciliacion/ejecutar
-Content-Type: application/json
-
+# Respuesta:
 {
-  "rfc_empresa": "ABC123456789",
-  "mes": 1,
-  "anio": 2024,
-  "tolerancia_monto": 1.00,
-  "dias_tolerancia": 3
+  "id": 123,
+  "empresa_id": 1,
+  "nombre_archivo": "estado_cuenta.pdf",
+  "banco": "BBVA",
+  "total_movimientos": 25,
+  "movimientos_procesados": 25,
+  "procesado_exitosamente": true,
+  "fecha_creacion": "2025-01-15T10:30:00",
+  "fecha_procesamiento": "2025-01-15T10:30:05",
+  "tiempo_procesamiento": 5,
+  "resultado_procesamiento": {
+    "exito": true,
+    "mensaje": "PDF procesado exitosamente: 25 movimientos extraídos",
+    "banco_detectado": "BBVA",
+    "total_movimientos_extraidos": 25,
+    "movimientos": [
+      {
+        "fecha": "2025-01-15",
+        "concepto": "SPEI ENVIADO BANREGIO",
+        "referencia": "BNET01002506200029230973",
+        "cargos": 2000.00,
+        "abonos": null,
+        "saldo": 50000.00,
+        "tipo": "CARGO",
+        "estado": "PENDIENTE"
+      }
+    ],
+    "modelo_utilizado": "gemini-2.5-flash-lite",
+    "tiempo_procesamiento_segundos": 5.2
+  }
 }
 ```
 
-### Obtener Reporte
+### Obtener Movimientos de Archivo
 ```http
-GET /api/v1/conciliacion/reporte/{empresa_id}?mes=1&anio=2024
+GET /api/v1/procesar-pdf/archivo/{archivo_id}
+
+# Respuesta:
+{
+  "id": 123,
+  "empresa_id": 1,
+  "nombre_archivo": "estado_cuenta.pdf",
+  "banco": "BBVA",
+  "total_movimientos": 25,
+  "movimientos_procesados": 25,
+  "procesado_exitosamente": true,
+  "resultado_procesamiento": {
+    "movimientos": [...]
+  }
+}
+```
+
+### Listar Archivos de Empresa
+```http
+GET /api/v1/procesar-pdf/empresa/{empresa_id}
+
+# Respuesta:
+[
+  {
+    "id": 123,
+    "nombre_archivo": "estado_cuenta.pdf",
+    "banco": "BBVA",
+    "total_movimientos": 25,
+    "procesado_exitosamente": true,
+    "fecha_creacion": "2025-01-15T10:30:00"
+  }
+]
 ```
 
 ## 🧪 Testing
@@ -170,9 +215,9 @@ pytest app/conciliacion/tests/ --cov=app.conciliacion --cov-report=html
 
 ### Problemas Comunes
 
-1. **Error "OPENAI_API_KEY es requerida"**
+1. **Error "GEMINI_API_KEY es requerida"**
    - Verificar que la variable esté configurada en `.env`
-   - La clave debe tener permisos para usar Vision API
+   - Obtener API Key en: https://makersuite.google.com/app/apikey
 
 2. **Error de conexión a base de datos**
    - Verificar credenciales en `.env`
@@ -182,24 +227,9 @@ pytest app/conciliacion/tests/ --cov=app.conciliacion --cov-report=html
 3. **Error al procesar PDF**
    - Verificar que el archivo sea un PDF válido
    - Máximo 50MB por archivo
-   - Debe ser un estado de cuenta de banco soportado
+   - Debe ser un estado de cuenta de banco soportado (BBVA, Santander, Banorte, Inbursa)
 
-## 🚦 Estado del Proyecto
-
-- ✅ **Backend**: Módulo de conciliación completo y funcional
-- ✅ **API**: Endpoints REST documentados
-- ✅ **Frontend**: Interfaz básica para conciliación
-- ✅ **OCR**: Integración con OpenAI Vision API
-- ✅ **Base de Datos**: Modelos y migraciones
-- ✅ **Tests**: Cobertura básica del módulo
-
-## 📝 Licencia
-
-Este proyecto está bajo licencia privada. Para más información, contactar al equipo de desarrollo.
-
-## 🆘 Soporte
-
-Para soporte técnico o preguntas:
-- 📧 Email: soporte@conciliacion-bancaria.com
-- 📚 Documentación: http://localhost:8000/docs
-- 📖 Wiki: Ver carpeta `app/conciliacion/README.md`
+4. **Detección incorrecta de banco**
+   - El sistema detecta automáticamente el banco
+   - Si detecta mal, verificar que el PDF sea del banco correcto
+   - Los prompts están optimizados para cada banco específico

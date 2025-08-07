@@ -129,15 +129,15 @@ class ArchivoBancarioService:
             logger.error(f"❌ Error creando archivo bancario: {e}")
             raise
     
-    def procesar_archivo(self, archivo_bancario: ArchivoBancario, file_path: str) -> Dict[str, Any]:
+    def procesar_archivo(self, archivo_bancario: ArchivoBancario, file_path: str, forzar_gemini: bool = False) -> Dict[str, Any]:
         #Procesa un archivo bancario con Gemini y actualiza la BD
         inicio_procesamiento = datetime.now()
         
         try:
             logger.info(f"🚀 Iniciando procesamiento: {archivo_bancario.nombre_archivo}")
             
-            # Procesar con Gemini
-            resultado = self.gemini_processor.procesar_pdf(file_path)
+            # Procesar con Gemini (permitir forzar flujo sin parsers locales ni chunking)
+            resultado = self.gemini_processor.procesar_pdf(file_path, forzar_gemini=forzar_gemini)
             
             # Actualizar archivo con resultados
             self._actualizar_archivo_con_resultados(archivo_bancario, resultado, inicio_procesamiento)
@@ -283,26 +283,27 @@ class ArchivoBancarioService:
         #Guarda los movimientos extraídos en la base de datos
         try:
             movimientos_guardados = 0
+            movimientos_omitidos = 0
             
-            for mov in movimientos:
+            logger.info(f"📊 Iniciando guardado de {len(movimientos)} movimientos en BD")
+            
+            for i, mov in enumerate(movimientos):
                 try:
-                    # Parsear fecha
+                    # Parsear fecha usando función robusta
                     fecha_str = mov.get('fecha')
                     if not fecha_str:
-                        logger.warning(f"⚠️ Movimiento sin fecha, saltando: {mov}")
+                        movimientos_omitidos += 1
+                        if movimientos_omitidos <= 3:  # Solo mostrar los primeros 3
+                            logger.warning(f"⚠️ Movimiento {i+1} sin fecha, saltando: {mov}")
                         continue
                     
-                    # Intentar diferentes formatos de fecha
-                    fecha = None
-                    for formato in ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d/%m/%y']:
-                        try:
-                            fecha = datetime.strptime(fecha_str, formato)
-                            break
-                        except ValueError:
-                            continue
+                    # Usar función robusta para parsear fecha
+                    fecha = self._parsear_fecha_robusta(fecha_str)
                     
                     if not fecha:
-                        logger.warning(f"⚠️ No se pudo parsear fecha '{fecha_str}', usando fecha actual")
+                        movimientos_omitidos += 1
+                        if movimientos_omitidos <= 3:  # Solo mostrar los primeros 3
+                            logger.warning(f"⚠️ Movimiento {i+1}: No se pudo parsear fecha '{fecha_str}', usando fecha actual")
                         fecha = datetime.now()
                     
                     # Determinar tipo de movimiento y monto
@@ -365,19 +366,147 @@ class ArchivoBancarioService:
                     movimientos_guardados += 1
                     
                 except Exception as e:
-                    logger.error(f"❌ Error guardando movimiento: {e}")
+                    movimientos_omitidos += 1
+                    if movimientos_omitidos <= 3:  # Solo mostrar los primeros 3
+                        logger.error(f"❌ Error guardando movimiento {i+1}: {e}")
+                    else:
+                        logger.error(f"❌ Error guardando movimiento {i+1} (y otros {movimientos_omitidos-3} más)")
                     continue
             
             # Commit de todos los movimientos
             self.db.commit()
             logger.info(f"✅ Guardados {movimientos_guardados} movimientos en BD")
+            logger.info(f"📊 Resumen: {movimientos_guardados} guardados, {movimientos_omitidos} omitidos de {len(movimientos)} totales")
             
+            # Commit de todos los movimientos
+            self.db.commit()
+            logger.info(f"✅ Guardados {movimientos_guardados} movimientos en BD")
+            logger.info(f"📊 Resumen: {movimientos_guardados} guardados, {movimientos_omitidos} omitidos de {len(movimientos)} totales")
             return movimientos_guardados
             
         except Exception as e:
             self.db.rollback()
             logger.error(f"❌ Error guardando movimientos: {e}")
             return 0
+    
+    def _parsear_fecha_robusta(self, fecha_str: str) -> Optional[datetime]:
+        """
+        Función robusta para parsear fechas de diferentes bancos.
+        Maneja formatos de BBVA, Santander, Banorte e Inbursa.
+        """
+        if not fecha_str:
+            return None
+        
+        fecha_str = fecha_str.strip()
+        
+        # Mapeo de meses en español
+        meses_es = {
+            'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06',
+            'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12',
+            'ENERO': '01', 'FEBRERO': '02', 'MARZO': '03', 'ABRIL': '04', 'MAYO': '05', 'JUNIO': '06',
+            'JULIO': '07', 'AGOSTO': '08', 'SEPTIEMBRE': '09', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12'
+        }
+        
+        # Formatos estándar
+        formatos_estandar = [
+            '%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d/%m/%y', '%d-%m-%y',
+            '%d/%m/%Y', '%Y/%m/%d', '%d-%m-%Y', '%d/%m/%y', '%d-%m-%y'
+        ]
+        
+        # Intentar formatos estándar primero
+        for formato in formatos_estandar:
+            try:
+                return datetime.strptime(fecha_str, formato)
+            except ValueError:
+                continue
+        
+        # Formato BBVA: "20/JUN", "21/JUN"
+        if '/' in fecha_str and len(fecha_str.split('/')) == 2:
+            try:
+                dia, mes = fecha_str.split('/')
+                if mes.upper() in meses_es:
+                    mes_num = meses_es[mes.upper()]
+                    # Asumir año actual si no está especificado
+                    año = datetime.now().year
+                    fecha_completa = f"{dia.zfill(2)}/{mes_num}/{año}"
+                    return datetime.strptime(fecha_completa, '%d/%m/%Y')
+            except (ValueError, IndexError):
+                pass
+        
+        # Formato Santander: "31-DIC-2023", "04-ENE-2024", "31-ENE" (sin año)
+        if '-' in fecha_str and len(fecha_str.split('-')) >= 2:
+            try:
+                partes = fecha_str.split('-')
+                if len(partes) == 3:
+                    # Formato completo: "31-DIC-2023"
+                    dia, mes, año = partes
+                    if mes.upper() in meses_es:
+                        mes_num = meses_es[mes.upper()]
+                        fecha_completa = f"{dia.zfill(2)}/{mes_num}/{año}"
+                        return datetime.strptime(fecha_completa, '%d/%m/%Y')
+                elif len(partes) == 2:
+                    # Formato sin año: "31-ENE"
+                    dia, mes = partes
+                    if mes.upper() in meses_es:
+                        mes_num = meses_es[mes.upper()]
+                        # Asumir año actual si no está especificado
+                        año = datetime.now().year
+                        fecha_completa = f"{dia.zfill(2)}/{mes_num}/{año}"
+                        return datetime.strptime(fecha_completa, '%d/%m/%Y')
+            except (ValueError, IndexError):
+                pass
+        
+        # Formato Inbursa: "MAY. 01", "MAY. 01 2025"
+        if '.' in fecha_str:
+            try:
+                partes = fecha_str.split('.')
+                if len(partes) >= 2:
+                    mes = partes[0].strip()
+                    resto = partes[1].strip()
+                    
+                    if mes.upper() in meses_es:
+                        mes_num = meses_es[mes.upper()]
+                        
+                        # Extraer día y año del resto
+                        if ' ' in resto:
+                            dia, año = resto.split(' ', 1)
+                            año = año.strip()
+                        else:
+                            dia = resto
+                            año = datetime.now().year
+                        
+                        fecha_completa = f"{dia.zfill(2)}/{mes_num}/{año}"
+                        return datetime.strptime(fecha_completa, '%d/%m/%Y')
+            except (ValueError, IndexError):
+                pass
+        
+        # Formato Banorte: "31-DIC-22", "03-ENE-23"
+        if '-' in fecha_str and len(fecha_str.split('-')) == 3:
+            try:
+                dia, mes, año = fecha_str.split('-')
+                if mes.upper() in meses_es:
+                    mes_num = meses_es[mes.upper()]
+                    # Manejar años de 2 dígitos
+                    if len(año) == 2:
+                        año = f"20{año}"
+                    fecha_completa = f"{dia.zfill(2)}/{mes_num}/{año}"
+                    return datetime.strptime(fecha_completa, '%d/%m/%Y')
+            except (ValueError, IndexError):
+                pass
+        
+        # Intentar con locale español como último recurso
+        try:
+            import locale
+            locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
+            return datetime.strptime(fecha_str, '%d-%b-%Y')
+        except (ValueError, locale.Error):
+            try:
+                return datetime.strptime(fecha_str, '%d-%b-%Y')
+            except ValueError:
+                pass
+        
+        logger.warning(f"⚠️ No se pudo parsear fecha: '{fecha_str}'")
+        return None
     
     def _mapear_banco(self, banco_detectado: str) -> TipoBanco:
         #Mapea el banco detectado por Gemini al enum TipoBanco

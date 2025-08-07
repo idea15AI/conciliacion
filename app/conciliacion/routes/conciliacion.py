@@ -197,3 +197,74 @@ async def obtener_movimientos_pendientes(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error obteniendo movimientos pendientes: {str(e)}"
         ) 
+
+@router.get("/detalles/{empresa_id}")
+async def obtener_detalles_conciliacion(
+    empresa_id: int,
+    fecha_inicio: str = None,
+    fecha_fin: str = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene detalles de conciliación con montos de CFDI
+    """
+    try:
+        # Construir query base
+        query = db.query(MovimientoBancario).filter(
+            MovimientoBancario.empresa_id == empresa_id
+        )
+        
+        # Aplicar filtros de fecha
+        if fecha_inicio:
+            fecha_inicio_dt = datetime.strptime(fecha_inicio, "%Y-%m-%d")
+            query = query.filter(MovimientoBancario.fecha >= fecha_inicio_dt)
+            
+        if fecha_fin:
+            fecha_fin_dt = datetime.strptime(fecha_fin, "%Y-%m-%d")
+            query = query.filter(MovimientoBancario.fecha <= fecha_fin_dt)
+        
+        movimientos = query.all()
+        
+        detalles = []
+        for movimiento in movimientos:
+            # Obtener datos del CFDI si existe
+            cfdi_monto = None
+            cfdi_total = None
+            cfdi_id = None
+            
+            if movimiento.comprobante_fiscal_id:
+                cfdi = db.query(ComprobanteFiscal).filter(
+                    ComprobanteFiscal.id == movimiento.comprobante_fiscal_id
+                ).first()
+                if cfdi:
+                    cfdi_monto = cfdi.total
+                    cfdi_total = cfdi.total
+                    cfdi_id = cfdi.id
+            
+            detalle = {
+                'movimiento_id': movimiento.id,
+                'cfdi_id': cfdi_id,
+                'tipo': movimiento.estado.value if movimiento.estado else 'pendiente',
+                'puntaje_fuzzy': None,  # No disponible en este endpoint
+                'razon': f"Estado: {movimiento.estado.value if movimiento.estado else 'PENDIENTE'}",
+                'fecha': movimiento.fecha.isoformat() if movimiento.fecha else None,
+                'concepto': movimiento.concepto if movimiento.concepto else None,
+                'monto': float(movimiento.monto) if movimiento.monto else 0,
+                'cfdi_monto': float(cfdi_monto) if cfdi_monto else None,
+                'cfdi_total': float(cfdi_total) if cfdi_total else None
+            }
+            detalles.append(detalle)
+        
+        return {
+            "empresa_id": empresa_id,
+            "total_movimientos": len(movimientos),
+            "detalles": detalles,
+            "fecha_reporte": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error obteniendo detalles: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error obteniendo detalles: {str(e)}"
+        ) 

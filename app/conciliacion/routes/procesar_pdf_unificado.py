@@ -40,7 +40,8 @@ def get_archivo_service(db: Session = Depends(get_db)) -> ArchivoBancarioService
 async def procesar_pdf_unificado(
     empresa_id: int,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    forzar_gemini: bool = False,
 ):
     """
     Procesa un PDF bancario de manera unificada
@@ -87,19 +88,80 @@ async def procesar_pdf_unificado(
                 tamano_bytes=len(contenido)
             )
             
-            # Solo procesar si es un archivo nuevo
-            if es_nuevo:
-                logger.info(f"🆕 Procesando archivo nuevo: {file.filename}")
-                resultado = archivo_service.procesar_archivo(archivo_bancario, temp_file_path)
+            # Siempre procesar para obtener los datos originales
+            logger.info(f"🔄 Procesando archivo: {file.filename}")
+            resultado = archivo_service.procesar_archivo(
+                archivo_bancario,
+                temp_file_path,
+                forzar_gemini=forzar_gemini,
+            )
+            
+            # Obtener movimientos originales directamente del procesamiento de Gemini
+            # Usar los datos antes de cualquier filtrado o procesamiento adicional
+            movimientos_originales = []
+            
+            # Si es un archivo nuevo, los datos están en resultado['movimientos']
+            if resultado.get('exito', False):
+                movimientos_originales = resultado.get('movimientos', [])
+                logger.info(f"📊 Movimientos originales obtenidos: {len(movimientos_originales)}")
+                
+                # Debug: mostrar los primeros movimientos originales
+                for i, mov in enumerate(movimientos_originales[:3]):
+                    logger.info(f"  Movimiento original {i+1}: cargos={mov.get('cargos')}, abonos={mov.get('abonos')}")
             else:
-                logger.info(f"✅ Archivo ya existe, retornando datos existentes: {file.filename}")
-                resultado = {
-                    'exito': archivo_bancario.procesado_exitosamente,
-                    'mensaje': 'Archivo ya procesado anteriormente',
-                    'total_movimientos_extraidos': archivo_bancario.total_movimientos,
-                    'banco_detectado': archivo_bancario.banco.value if archivo_bancario.banco else 'OTRO',
-                    'tiempo_procesamiento_segundos': archivo_bancario.tiempo_procesamiento or 0
-                }
+                logger.warning("⚠️ No se pudieron obtener movimientos originales del procesamiento")
+            
+            # Convertir a formato de respuesta y filtrar duplicados
+            movimientos = []
+            movimientos_vistos = set()  # Para evitar duplicados
+            
+            logger.info(f"📊 Procesando {len(movimientos_originales)} movimientos originales")
+            
+            for i, mov in enumerate(movimientos_originales):
+                # Usar los valores originales de cargos y abonos del procesamiento
+                cargos = mov.get('cargos')
+                abonos = mov.get('abonos')
+                
+                # Crear clave única más simple para evitar duplicados
+                clave_unica = f"{mov.get('fecha')}_{mov.get('concepto')}_{cargos}_{abonos}"
+                
+                # Debug: mostrar algunos movimientos
+                if i < 5:  # Solo los primeros 5 para debug
+                    logger.info(f"🔄 Movimiento {i+1}: fecha={mov.get('fecha')}, concepto={mov.get('concepto')[:50]}, cargos={cargos}, abonos={abonos}")
+                
+                # Solo agregar si no es duplicado
+                if clave_unica not in movimientos_vistos:
+                    movimientos_vistos.add(clave_unica)
+                    
+                    movimientos.append({
+                        'fecha': mov.get('fecha'),
+                        'concepto': mov.get('concepto'),
+                        'referencia': mov.get('referencia'),
+                        'cargos': cargos,
+                        'abonos': abonos,
+                        'saldo': mov.get('saldo'),
+                        'tipo': 'CARGO' if cargos and cargos > 0 else 'ABONO' if abonos and abonos > 0 else 'N/A',
+                        'estado': 'PENDIENTE'
+                    })
+                else:
+                    logger.info(f"🔄 Duplicado encontrado: {clave_unica}")
+            
+            logger.info(f"📊 Movimientos después de filtrado: {len(movimientos)} de {len(movimientos_originales)}")
+            
+            # Agregar movimientos al resultado
+            resultado['movimientos'] = movimientos
+            
+            # Log para debug: mostrar los primeros movimientos
+            logger.info(f"📊 Movimientos enviados al frontend:")
+            for i, mov in enumerate(movimientos[:5]):  # Solo los primeros 5
+                logger.info(f"  Movimiento {i+1}: fecha={mov.get('fecha')}, concepto={mov.get('concepto')[:50]}, cargos={mov.get('cargos')}, abonos={mov.get('abonos')}")
+            
+            # Log para debug: mostrar la estructura completa del resultado
+            logger.info(f"📊 Estructura del resultado enviado:")
+            logger.info(f"  - resultado.keys(): {list(resultado.keys())}")
+            logger.info(f"  - resultado['movimientos']: {len(resultado.get('movimientos', []))} movimientos")
+            logger.info(f"  - Total movimientos originales: {len(movimientos_originales)}")
+            logger.info(f"  - Total movimientos filtrados: {len(movimientos)}")
             
             logger.info(f"✅ Proceso completado: {file.filename}")
             
@@ -253,7 +315,7 @@ async def obtener_movimientos_empresa(
         ]
         
     except Exception as e:
-        logger.error(f"❌ Error obteniendo movimientos: {e}")
+        logger.error(f" Error obteniendo movimientos: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error obteniendo movimientos: {str(e)}"

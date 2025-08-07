@@ -261,6 +261,38 @@ class ConciliadorMejorado:
         fuzzy = len([r for r in resultados if r.tipo_conciliacion == TipoConciliacion.FUZZY])
         pendientes = len([r for r in resultados if r.tipo_conciliacion == TipoConciliacion.PENDIENTE])
         
+        detalles = []
+        for r in resultados:
+            # Obtener datos del movimiento
+            movimiento = self.db.query(MovimientoBancario).filter(
+                MovimientoBancario.id == r.movimiento_id
+            ).first()
+            
+            # Obtener datos del CFDI si existe
+            cfdi_monto = None
+            cfdi_total = None
+            if r.cfdi_id:
+                cfdi = self.db.query(ComprobanteFiscal).filter(
+                    ComprobanteFiscal.id == r.cfdi_id
+                ).first()
+                if cfdi:
+                    cfdi_monto = cfdi.total
+                    cfdi_total = cfdi.total
+            
+            detalle = {
+                'movimiento_id': r.movimiento_id,
+                'cfdi_id': r.cfdi_id,
+                'tipo': r.tipo_conciliacion.value,
+                'puntaje_fuzzy': r.puntaje_fuzzy,
+                'razon': r.razon,
+                'fecha': movimiento.fecha.isoformat() if movimiento else None,
+                'concepto': movimiento.concepto if movimiento else None,
+                'monto': float(movimiento.monto) if movimiento else 0,
+                'cfdi_monto': float(cfdi_monto) if cfdi_monto else None,
+                'cfdi_total': float(cfdi_total) if cfdi_total else None
+            }
+            detalles.append(detalle)
+        
         return {
             'resumen': {
                 'total_movimientos': total_movimientos,
@@ -269,14 +301,5 @@ class ConciliadorMejorado:
                 'pendientes_revision': pendientes,
                 'porcentaje_automatizado': ((exactos + fuzzy) / total_movimientos * 100) if total_movimientos > 0 else 0
             },
-            'detalles': [
-                {
-                    'movimiento_id': r.movimiento_id,
-                    'cfdi_id': r.cfdi_id,
-                    'tipo': r.tipo_conciliacion.value,
-                    'puntaje_fuzzy': r.puntaje_fuzzy,
-                    'razon': r.razon
-                }
-                for r in resultados
-            ]
+            'detalles': detalles
         } 

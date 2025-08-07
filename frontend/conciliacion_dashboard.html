@@ -13,50 +13,29 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #fafafa;
+            background: #f5f5f5;
             color: #333;
             line-height: 1.6;
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
         }
 
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-            padding: 40px 0;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        }
-
-        .header h1 {
-            font-size: 2.2em;
-            font-weight: 300;
-            color: #2c3e50;
-            margin-bottom: 8px;
-        }
-
-        .header p {
-            color: #7f8c8d;
-            font-size: 1.1em;
-        }
-
         .controls {
             background: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            margin-bottom: 30px;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
         }
 
         .form-group {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+            gap: 15px;
             align-items: end;
         }
 
@@ -68,39 +47,25 @@
         .form-item label {
             font-weight: 500;
             color: #2c3e50;
-            margin-bottom: 8px;
+            margin-bottom: 5px;
             font-size: 0.9em;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
         }
 
         .form-item input, .form-item select {
-            padding: 12px 16px;
-            border: 2px solid #e9ecef;
-            border-radius: 8px;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
             font-size: 14px;
-            transition: all 0.2s;
-            background: white;
-        }
-
-        .form-item input:focus, .form-item select:focus {
-            outline: none;
-            border-color: #3498db;
-            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
         }
 
         .btn {
-            padding: 14px 28px;
+            padding: 10px 20px;
             border: none;
-            border-radius: 8px;
+            border-radius: 4px;
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
         }
 
         .btn-primary {
@@ -110,8 +75,6 @@
 
         .btn-primary:hover {
             background: #2980b9;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
         }
 
         .btn-secondary {
@@ -125,14 +88,14 @@
 
         .results {
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             overflow: hidden;
         }
 
         .loading {
             text-align: center;
-            padding: 60px;
+            padding: 40px;
             color: #7f8c8d;
         }
 
@@ -151,153 +114,26 @@
             100% { transform: rotate(360deg); }
         }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            padding: 30px;
-        }
-
-        .stat-card {
-            background: white;
-            padding: 25px;
-            border-radius: 12px;
-            text-align: center;
-            border: 1px solid #e9ecef;
-            transition: transform 0.2s;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-2px);
-        }
-
-        .stat-card.exact {
-            border-left: 4px solid #27ae60;
-        }
-
-        .stat-card.fuzzy {
-            border-left: 4px solid #f39c12;
-        }
-
-        .stat-card.pending {
-            border-left: 4px solid #e74c3c;
-        }
-
-        .stat-card.automated {
-            border-left: 4px solid #3498db;
-        }
-
-        .stat-number {
-            font-size: 2.5em;
-            font-weight: 300;
-            margin-bottom: 8px;
-            color: #2c3e50;
-        }
-
-        .stat-label {
-            color: #7f8c8d;
-            font-size: 0.85em;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 500;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 6px;
-            background: #ecf0f1;
-            border-radius: 3px;
-            overflow: hidden;
-            margin-top: 15px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            transition: width 0.3s ease;
-        }
-
-        .progress-fill.exact {
-            background: #27ae60;
-        }
-
-        .progress-fill.fuzzy {
-            background: #f39c12;
-        }
-
-        .progress-fill.pending {
-            background: #e74c3c;
-        }
-
-        .progress-fill.automated {
-            background: #3498db;
-        }
-
-        .details-section {
-            padding: 30px;
-            border-top: 1px solid #e9ecef;
-        }
-
-        .details-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 25px;
-        }
-
-        .details-header h3 {
-            font-weight: 400;
-            color: #2c3e50;
-            font-size: 1.3em;
-        }
-
-        .filter-tabs {
-            display: flex;
-            gap: 8px;
-        }
-
-        .filter-tab {
-            padding: 8px 16px;
-            border: 1px solid #e9ecef;
-            border-radius: 20px;
-            background: white;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 13px;
-            color: #7f8c8d;
-        }
-
-        .filter-tab.active {
-            background: #3498db;
-            color: white;
-            border-color: #3498db;
-        }
-
-        .filter-tab:hover:not(.active) {
-            background: #f8f9fa;
-        }
-
         .movements-table {
             width: 100%;
             border-collapse: collapse;
             background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
         }
 
         .movements-table th {
             background: #f8f9fa;
-            padding: 16px;
+            padding: 12px;
             text-align: left;
             font-weight: 500;
             color: #2c3e50;
             font-size: 0.85em;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            border-bottom: 2px solid #e9ecef;
         }
 
         .movements-table td {
-            padding: 16px;
+            padding: 12px;
             border-bottom: 1px solid #e9ecef;
             font-size: 14px;
         }
@@ -307,7 +143,7 @@
         }
 
         .status-badge {
-            padding: 4px 12px;
+            padding: 4px 8px;
             border-radius: 12px;
             font-size: 11px;
             font-weight: 500;
@@ -333,107 +169,108 @@
         .error {
             background: #fadbd8;
             color: #c0392b;
-            padding: 16px;
-            border-radius: 8px;
-            margin: 20px 0;
+            padding: 12px;
+            border-radius: 4px;
+            margin: 10px 0;
             border: 1px solid #f1948a;
         }
 
         .success {
             background: #d5f4e6;
             color: #27ae60;
-            padding: 16px;
-            border-radius: 8px;
-            margin: 20px 0;
+            padding: 12px;
+            border-radius: 4px;
+            margin: 10px 0;
             border: 1px solid #a9dfbf;
         }
 
-        .info-box {
-            background: #ebf3fd;
-            border: 1px solid #b3d9ff;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 30px;
+        .monto-comparison {
+            font-family: 'Courier New', monospace;
+            font-weight: 500;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
         }
 
-        .info-box h4 {
+        .monto-banco {
             color: #2c3e50;
-            margin-bottom: 10px;
+            font-weight: 600;
+        }
+
+        .monto-cfdi {
+            color: #27ae60;
+            font-weight: 600;
+        }
+
+        .monto-diferencia {
+            color: #e74c3c;
+            font-size: 0.85em;
             font-weight: 500;
         }
 
-        .info-box p {
+        .monto-label {
+            font-size: 0.75em;
             color: #7f8c8d;
-            font-size: 0.9em;
-            line-height: 1.5;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .monto-solo {
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        .monto-info {
+            font-size: 0.7em;
+            color: #95a5a6;
+            font-style: italic;
+            margin-top: 2px;
+        }
+
+        .monto-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .monto-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .monto-row .monto-label {
+            min-width: 60px;
         }
 
         @media (max-width: 768px) {
             .form-group {
                 grid-template-columns: 1fr;
             }
-            
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .details-header {
-                flex-direction: column;
-                gap: 15px;
-                align-items: stretch;
-            }
-            
-            .filter-tabs {
-                justify-content: center;
-            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>Conciliación Bancaria</h1>
-            <p>Sistema inteligente de conciliación automática</p>
-        </div>
-
-        <div class="info-box">
-            <h4>💡 ¿Cómo funciona?</h4>
-            <p>El sistema compara automáticamente tus movimientos bancarios con las facturas CFDIs válidas. <strong>Filtros aplicados:</strong> Solo CFDIs tipo 'I' (Ingreso) con método 'PUE' o CFDIs tipo 'P' (Pago), ignorando CFDIs con método 'PPD'. Usa coincidencia exacta (fecha + monto) y fuzzy matching (texto similar) para encontrar correspondencias. Los movimientos sin coincidencia automática quedan pendientes de revisión manual.</p>
-        </div>
-
         <div class="controls">
             <div class="form-group">
                 <div class="form-item">
                     <label for="empresaId">Empresa ID</label>
                     <input type="number" id="empresaId" value="1" min="1">
                 </div>
-                
-                <div class="form-item">
-                    <label for="umbralFuzzy">Umbral Fuzzy (%)</label>
-                    <input type="number" id="umbralFuzzy" value="85" min="0" max="100" disabled style="background-color: #f8f9fa; color: #6c757d;">
-                    <small style="color: #6c757d; font-size: 0.8em;">Fijo en 85%</small>
-                </div>
-                
                 <div class="form-item">
                     <label for="fechaInicio">Fecha Inicio</label>
                     <input type="date" id="fechaInicio">
                 </div>
-                
                 <div class="form-item">
                     <label for="fechaFin">Fecha Fin</label>
                     <input type="date" id="fechaFin">
                 </div>
-                
                 <div class="form-item">
-                    <button class="btn btn-primary" onclick="ejecutarConciliacion()">
-                        🚀 Ejecutar Conciliación
-                    </button>
+                    <button class="btn btn-primary" onclick="ejecutarConciliacion()">Ejecutar</button>
                 </div>
-                
                 <div class="form-item">
-                    <button class="btn btn-secondary" onclick="obtenerReporte()">
-                        📊 Ver Reporte
-                    </button>
+                    <button class="btn btn-secondary" onclick="obtenerReporte()">Ver Detalles</button>
                 </div>
             </div>
         </div>
@@ -441,86 +278,35 @@
         <div class="results" id="results">
             <div class="loading" id="loading" style="display: none;">
                 <div class="spinner"></div>
-                <p>Ejecutando conciliación...</p>
+                <p>Procesando...</p>
             </div>
-            
+
             <div id="error" class="error" style="display: none;"></div>
             <div id="success" class="success" style="display: none;"></div>
-            
-            <div id="stats" style="display: none;">
-                <div class="stats-grid">
-                    <div class="stat-card exact">
-                        <div class="stat-number" id="exactCount">0</div>
-                        <div class="stat-label">Conciliados Exactos</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill exact" id="exactProgress" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    
-                    <div class="stat-card fuzzy">
-                        <div class="stat-number" id="fuzzyCount">0</div>
-                        <div class="stat-label">Conciliados Fuzzy</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill fuzzy" id="fuzzyProgress" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    
-                    <div class="stat-card pending">
-                        <div class="stat-number" id="pendingCount">0</div>
-                        <div class="stat-label">Pendientes Revisión</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill pending" id="pendingProgress" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    
-                    <div class="stat-card automated">
-                        <div class="stat-number" id="automatedPercent">0%</div>
-                        <div class="stat-label">Automatización</div>
-                        <div class="progress-bar">
-                            <div class="progress-fill automated" id="automatedProgress" style="width: 0%"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="details-section">
-                    <div class="details-header">
-                        <h3>Detalles de Conciliación</h3>
-                        <div class="filter-tabs">
-                            <div class="filter-tab active" onclick="filterMovements('all')">Todos</div>
-                            <div class="filter-tab" onclick="filterMovements('exact')">Exactos</div>
-                            <div class="filter-tab" onclick="filterMovements('fuzzy')">Fuzzy</div>
-                            <div class="filter-tab" onclick="filterMovements('pending')">Pendientes</div>
-                        </div>
-                    </div>
-                    
-                    <table class="movements-table" id="movementsTable">
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Fecha</th>
-                                <th>Concepto</th>
-                                <th>Monto</th>
-                                <th>CFDI ID</th>
-                                <th>Estado</th>
-                                <th>Puntaje</th>
-                                <th>Razón</th>
-                            </tr>
-                        </thead>
-                        <tbody id="movementsBody">
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+
+            <table class="movements-table" id="movementsTable">
+                <thead>
+                    <tr>
+                        <th>Conciliación ID</th>
+                        <th>Fecha</th>
+                        <th>Concepto</th>
+                        <th>Monto (Banco vs CFDI)</th>
+                        <th>CFDI ID</th>
+                        <th>Estado</th>
+                        <th>Puntaje</th>
+                        <th>Razón</th>
+                    </tr>
+                </thead>
+                <tbody id="movementsBody"></tbody>
+            </table>
         </div>
     </div>
 
     <script>
         let currentData = null;
-        let currentFilter = 'all';
 
         async function ejecutarConciliacion() {
             const empresaId = document.getElementById('empresaId').value;
-            const umbralFuzzy = document.getElementById('umbralFuzzy').value;
             const fechaInicio = document.getElementById('fechaInicio').value;
             const fechaFin = document.getElementById('fechaFin').value;
             
@@ -528,13 +314,15 @@
             hideMessages();
             
             try {
-                let url = `http://localhost:8000/api/v1/conciliacion/ejecutar/${empresaId}?umbral_fuzzy=${umbralFuzzy}`;
+                let url = `http://localhost:8000/api/v1/conciliacion/ejecutar/${empresaId}`;
                 
                 if (fechaInicio) {
-                    url += `&fecha_inicio=${fechaInicio}`;
-                }
-                if (fechaFin) {
-                    url += `&fecha_fin=${fechaFin}`;
+                    url += `?fecha_inicio=${fechaInicio}`;
+                    if (fechaFin) {
+                        url += `&fecha_fin=${fechaFin}`;
+                    }
+                } else if (fechaFin) {
+                    url += `?fecha_fin=${fechaFin}`;
                 }
                 
                 const response = await fetch(url, {
@@ -570,7 +358,7 @@
             hideMessages();
             
             try {
-                let url = `http://localhost:8000/api/v1/conciliacion-mejorada/reporte/${empresaId}`;
+                let url = `http://localhost:8000/api/v1/conciliacion/detalles/${empresaId}`;
                 
                 if (fechaInicio) {
                     url += `?fecha_inicio=${fechaInicio}`;
@@ -589,38 +377,18 @@
                 
                 const data = await response.json();
                 showReporte(data);
-                showSuccess('Reporte obtenido exitosamente');
+                showSuccess('Detalles obtenidos exitosamente');
                 
             } catch (error) {
                 console.error('Error:', error);
-                showError(`Error obteniendo reporte: ${error.message}`);
+                showError(`Error obteniendo detalles: ${error.message}`);
             } finally {
                 hideLoading();
             }
         }
 
         function showResults(data) {
-            const resumen = data.resumen;
-            
-            // Actualizar estadísticas
-            document.getElementById('exactCount').textContent = resumen.conciliados_exactos;
-            document.getElementById('fuzzyCount').textContent = resumen.conciliados_fuzzy;
-            document.getElementById('pendingCount').textContent = resumen.pendientes_revision;
-            document.getElementById('automatedPercent').textContent = `${resumen.porcentaje_automatizado.toFixed(1)}%`;
-            
-            // Actualizar barras de progreso
-            const total = resumen.total_movimientos;
-            if (total > 0) {
-                document.getElementById('exactProgress').style.width = `${(resumen.conciliados_exactos / total) * 100}%`;
-                document.getElementById('fuzzyProgress').style.width = `${(resumen.conciliados_fuzzy / total) * 100}%`;
-                document.getElementById('pendingProgress').style.width = `${(resumen.pendientes_revision / total) * 100}%`;
-                document.getElementById('automatedProgress').style.width = `${resumen.porcentaje_automatizado}%`;
-            }
-            
-            // Mostrar detalles
-            showMovements(data.detalles);
-            
-            document.getElementById('stats').style.display = 'block';
+            showMovements(data.detalles || []);
         }
 
         function showReporte(data) {
@@ -650,12 +418,50 @@
                 
                 const statusClass = detalle.tipo === 'exacta' ? 'status-exact' : 
                                   detalle.tipo === 'fuzzy' ? 'status-fuzzy' : 'status-pending';
+
+                const movMonto = typeof detalle.monto === 'number' ? detalle.monto : (parseFloat(detalle.monto) || 0);
+                const cfdiMontoRaw = detalle.cfdi_monto ?? detalle.cfdi_total ?? null;
+                const cfdiMonto = cfdiMontoRaw != null ? (typeof cfdiMontoRaw === 'number' ? cfdiMontoRaw : (parseFloat(cfdiMontoRaw) || null)) : null;
+                const delta = (cfdiMonto != null) ? (movMonto - cfdiMonto) : null;
                 
+                // Formatear la comparación de montos
+                let montoDisplay = '';
+                if (cfdiMonto != null) {
+                    const diferencia = Math.abs(delta);
+                    const signoDiferencia = delta > 0 ? '+' : '-';
+                    const textoDiferencia = delta !== 0 ? `${signoDiferencia}$${diferencia.toFixed(2)}` : 'Sin diferencia';
+                    const infoDiferencia = delta > 0 ? '(Banco > CFDI)' : delta < 0 ? '(Banco < CFDI)' : '(Coinciden)';
+                    
+                    montoDisplay = `<div class="monto-container">
+                        <div class="monto-row">
+                            <span class="monto-label">Banco:</span>
+                            <span class="monto-banco">$${movMonto.toFixed(2)}</span>
+                        </div>
+                        <div class="monto-row">
+                            <span class="monto-label">CFDI:</span>
+                            <span class="monto-cfdi">$${cfdiMonto.toFixed(2)}</span>
+                        </div>
+                        <div class="monto-row">
+                            <span class="monto-label">Diferencia:</span>
+                            <span class="monto-diferencia">${textoDiferencia}</span>
+                        </div>
+                        <div class="monto-info">${infoDiferencia}</div>
+                    </div>`;
+                } else {
+                    montoDisplay = `<div class="monto-container">
+                        <div class="monto-row">
+                            <span class="monto-label">Banco:</span>
+                            <span class="monto-solo">$${movMonto.toFixed(2)}</span>
+                        </div>
+                        <div class="monto-info">Sin CFDI para comparar</div>
+                    </div>`;
+                }
+
                 row.innerHTML = `
-                    <td>${detalle.movimiento_id}</td>
+                    <td>${detalle.movimiento_id ?? 'N/A'}</td>
                     <td>${formatDate(detalle.fecha)}</td>
                     <td>${detalle.concepto || 'N/A'}</td>
-                    <td>$${detalle.monto?.toFixed(2) || '0.00'}</td>
+                    <td>${montoDisplay}</td>
                     <td>${detalle.cfdi_id || 'N/A'}</td>
                     <td><span class="status-badge ${statusClass}">${detalle.tipo}</span></td>
                     <td>${detalle.puntaje_fuzzy ? `${detalle.puntaje_fuzzy}%` : 'N/A'}</td>
@@ -663,26 +469,6 @@
                 `;
                 
                 tbody.appendChild(row);
-            });
-        }
-
-        function filterMovements(filter) {
-            currentFilter = filter;
-            
-            // Actualizar tabs activos
-            document.querySelectorAll('.filter-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            event.target.classList.add('active');
-            
-            // Filtrar filas
-            const rows = document.querySelectorAll('.movement-row');
-            rows.forEach(row => {
-                if (filter === 'all' || row.classList.contains(filter)) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
             });
         }
 
@@ -694,7 +480,6 @@
 
         function showLoading() {
             document.getElementById('loading').style.display = 'block';
-            document.getElementById('stats').style.display = 'none';
         }
 
         function hideLoading() {

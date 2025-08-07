@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF Processor - Gemini</title>
+    <title>PDF procesador</title>
     <style>
         * {
             margin: 0;
@@ -283,8 +283,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>📄 PDF Processor</h1>
-            <p>Extrae movimientos bancarios con Gemini AI</p>
+            <h1>📄 PDF Procesador</h1>
         </div>
 
         <div class="upload-area" id="uploadArea">
@@ -312,44 +311,10 @@
         <div id="error" class="error hidden"></div>
 
         <div id="results" class="results hidden">
-            <div class="result-header">
-                <div class="result-title">Resultados del Procesamiento</div>
-            </div>
-
-            <div class="stats" id="stats">
-                <!-- Stats will be populated here -->
-            </div>
-
             <div class="movements-section">
                 <div class="movements-title">Movimientos Extraídos</div>
                 <div id="movementsContainer">
                     <!-- Movements table will be populated here -->
-                </div>
-            </div>
-
-            <div class="json-section" id="jsonContainer">
-                <div class="json-title">Datos JSON</div>
-                <div class="json-view" id="jsonView"></div>
-            </div>
-            <div class="result-section" id="summarySection" style="display: none;">
-                <h3>📊 Resumen del Procesamiento</h3>
-                <div class="summary-grid">
-                    <div class="summary-item">
-                        <span class="label">Banco Detectado:</span>
-                        <span class="value" id="bancoDetectado">-</span>
-                    </div>
-                    <div class="summary-item">
-                        <span class="label">Total Movimientos:</span>
-                        <span class="value" id="totalMovimientos">-</span>
-                    </div>
-                    <div class="summary-item">
-                        <span class="label">Modelo Utilizado:</span>
-                        <span class="value" id="modeloUtilizado">-</span>
-                    </div>
-                    <div class="summary-item">
-                        <span class="label">Tiempo de Procesamiento:</span>
-                        <span class="value" id="tiempoProcesamiento">-</span>
-                    </div>
                 </div>
             </div>
         </div>
@@ -447,25 +412,12 @@
             const resultado = data.resultado_procesamiento || {};
             const movimientos = resultado.movimientos || [];
             
-            // Update stats
-            stats.innerHTML = `
-                <div class="stat-item">
-                    <div class="stat-value">${resultado.total_movimientos_extraidos || data.total_movimientos || 0}</div>
-                    <div class="stat-label">Movimientos</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value">${resultado.banco_detectado || data.banco || 'N/A'}</div>
-                    <div class="stat-label">Banco</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value">${resultado.tiempo_procesamiento_segundos || data.tiempo_procesamiento || 0}s</div>
-                    <div class="stat-label">Tiempo</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-value">${resultado.modelo_utilizado || 'N/A'}</div>
-                    <div class="stat-label">Modelo</div>
-                </div>
-            `;
+            // Debug: mostrar los primeros movimientos en la consola
+            console.log('📊 Datos recibidos:', data);
+            console.log('📊 Movimientos:', movimientos);
+            if (movimientos.length > 0) {
+                console.log('📊 Primer movimiento:', movimientos[0]);
+            }
 
             // Show movements table
             if (movimientos && movimientos.length > 0) {
@@ -475,21 +427,18 @@
             } else {
                 movementsContainer.innerHTML = '<p>No se encontraron movimientos en el PDF.</p>';
             }
-
-            // Show JSON data
-            jsonView.textContent = JSON.stringify(data, null, 2);
-
-            // Show summary section
-            summarySection.style.display = 'block';
-            bancoDetectado.textContent = resultado.banco_detectado || data.banco || 'N/A';
-            totalMovimientos.textContent = resultado.total_movimientos_extraidos || data.total_movimientos || 0;
-            modeloUtilizado.textContent = resultado.modelo_utilizado || 'N/A';
-            tiempoProcesamiento.textContent = `${resultado.tiempo_procesamiento_segundos || data.tiempo_procesamiento || 0}s`;
         }
 
         function createMovementsTable(movements) {
             const table = document.createElement('table');
             table.className = 'movements-table';
+            
+            // Debug: mostrar los primeros movimientos
+            console.log('📊 Creando tabla con movimientos:', movements);
+            if (movements.length > 0) {
+                console.log('📊 Primer movimiento completo:', movements[0]);
+                console.log('📊 Campos disponibles:', Object.keys(movements[0]));
+            }
             
             table.innerHTML = `
                 <thead>
@@ -497,23 +446,44 @@
                         <th>Fecha</th>
                         <th>Referencia</th>
                         <th>Concepto</th>
-                        <th>Cargos</th>
-                        <th>Abonos</th>
+                        <th>Tipo</th>
+                        <th>Monto</th>
                         <th>Saldo</th>
                     </tr>
                 </thead>
                 <tbody>
                     ${movements.map((mov, index) => {
-                        const cargoAmount = mov.cargos || 0;
-                        const abonoAmount = mov.abonos || 0;
+                        // Determinar tipo y monto basándose en cargos y abonos
+                        let tipo = 'N/A';
+                        let monto = 0;
+                        
+                        if (mov.cargos && mov.cargos > 0) {
+                            tipo = 'CARGO';
+                            monto = mov.cargos;
+                        } else if (mov.abonos && mov.abonos > 0) {
+                            tipo = 'ABONO';
+                            monto = mov.abonos;
+                        }
+                        
+                        // Debug: mostrar cada movimiento
+                        console.log(`📊 Movimiento ${index + 1}:`, {
+                            fecha: mov.fecha,
+                            referencia: mov.referencia,
+                            concepto: mov.concepto,
+                            tipo: tipo,
+                            monto: monto,
+                            cargos: mov.cargos,
+                            abonos: mov.abonos,
+                            saldo: mov.saldo
+                        });
                         
                         return `
                             <tr>
                                 <td>${mov.fecha || 'N/A'}</td>
                                 <td>${mov.referencia || 'N/A'}</td>
                                 <td>${mov.concepto || 'N/A'}</td>
-                                <td class="${cargoAmount > 0 ? 'cargo-amount' : ''}">${cargoAmount > 0 ? `$${cargoAmount.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : '-'}</td>
-                                <td class="${abonoAmount > 0 ? 'abono-amount' : ''}">${abonoAmount > 0 ? `$${abonoAmount.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : '-'}</td>
+                                <td class="${tipo === 'CARGO' ? 'cargo-amount' : tipo === 'ABONO' ? 'abono-amount' : ''}">${tipo}</td>
+                                <td class="${tipo === 'CARGO' ? 'cargo-amount' : tipo === 'ABONO' ? 'abono-amount' : ''}">${monto > 0 ? `$${monto.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : '-'}</td>
                                 <td>${mov.saldo ? `$${mov.saldo.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : 'N/A'}</td>
                             </tr>
                         `;
