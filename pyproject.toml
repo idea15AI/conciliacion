@@ -17,4 +17,6 @@ dependencies = [
     "openai>=1.97.0",
     "pymupdf>=1.26.3",
     "pillow>=11.3.0",
+    "numpy>=1.26.4",
+    "opencv-python-headless>=4.10.0.84",
 ]

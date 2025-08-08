@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import re
+import io
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import time
@@ -310,6 +311,15 @@ class GeminiProcessor:
             banco_detectado_previo = self._detectar_banco_por_contenido_pdf(pdf_path)
             logger.info(f"🏦 Banco detectado por contenido: {banco_detectado_previo}")
 
+            # Si es BBVA (chico o grande), usar SIEMPRE el flujo por imágenes
+            if banco_detectado_previo == "BBVA":
+                logger.info("🖼️ BBVA detectado → usando flujo por imágenes (multimodal)")
+                resultado_bbva = self._procesar_bbva_por_imagenes(pdf_path)
+                # Asegurar campos mínimos y tiempos
+                resultado_bbva['tiempo_procesamiento_segundos'] = round(time.time() - inicio, 2)
+                resultado_bbva['modelo_utilizado'] = resultado_bbva.get('modelo_utilizado', self.model_id)
+                return resultado_bbva
+
             # Modo forzado: extraer TODO el texto y enviarlo a Gemini con el prompt específico
             if forzar_gemini:
                 logger.info("🧲 Modo forzado Gemini: extrayendo texto completo y procesando con prompt del banco")
@@ -517,10 +527,7 @@ class GeminiProcessor:
         - MONTO DEL DEPOSITO = ABONO (ingreso)
         - MONTO DEL RETIRO = CARGO (egreso)
         
-        ### BBVA:
-        - Formato: OPER | FECHA | SALDO | COD. | DESCRIPCIÓN | REFERENCIA
-        - LIQUIDACION = SALDO (no es cargo ni abono, es saldo)
-        - Detectar movimientos reales, no liquidaciones
+    
         
         ### INBURSA:
         - Formato: FECHA REFERENCIA CONCEPTO (puede ser múltiples líneas) MONTO SALDO
@@ -1303,28 +1310,29 @@ class GeminiProcessor:
                 except (ValueError, TypeError):
                     saldo = 0.0
                 
-                # Usar valores originales si existen, sino calcular
-                if cargos_original is not None or abonos_original is not None:
-                    cargos = cargos_original
-                    abonos = abonos_original
-                    logger.info(f"🔄 Preservando valores originales: cargos={cargos}, abonos={abonos}")
-                else:
-                    # Solo calcular si no existen valores originales
+                # Inicializar con originales
+                cargos = cargos_original
+                abonos = abonos_original
+                
+                # Si no hay originales, intentar derivar del campo 'monto' y el tipo
+                if cargos is None and abonos is None:
                     monto_raw = mov.get("monto")
                     try:
                         monto = float(monto_raw) if monto_raw is not None else 0.0
-                        monto = abs(monto)  # Convert to absolute value
+                        monto = abs(monto)
                     except (ValueError, TypeError):
                         monto = 0.0
-                
-                # Determinar tipo de movimiento
-                tipo_movimiento = mov.get("tipo_movimiento", "")
-                if not tipo_movimiento:
-                    tipo_movimiento = self._mejorar_deteccion_tipo_movimiento(concepto, "")
-                
-                # Asignar montos según tipo
-                cargos = monto if tipo_movimiento == "cargo" else None
-                abonos = monto if tipo_movimiento == "abono" else None
+                    
+                    tipo_movimiento = mov.get("tipo_movimiento", "")
+                    if not tipo_movimiento:
+                        tipo_movimiento = self._mejorar_deteccion_tipo_movimiento(concepto, "")
+                    
+                    if tipo_movimiento == "cargo":
+                        cargos = monto
+                        abonos = None
+                    elif tipo_movimiento == "abono":
+                        abonos = monto
+                        cargos = None
                 
                 # Crear movimiento mejorado
                 movimiento_mejorado = {
@@ -1343,6 +1351,535 @@ class GeminiProcessor:
                 continue
         
         return movimientos_mejorados
+
+    # ===================== FLUJO BBVA POR IMÁGENES =====================
+    def _instruction_bbva_imagenes(self) -> str:
+        """Instrucción específica para extracción BBVA desde imágenes de tabla."""
+        return (
+            "Eres un experto en análisis de estados de cuenta bancarios BBVA. "
+            "Tu tarea es extraer movimientos bancarios de esta imagen de tabla con máxima precisión."
+            "\n\n"
+            "ESTRUCTURA DE LA TABLA BBVA:"
+            "La tabla tiene columnas en este orden: FECHA | COD. | DESCRIPCIÓN | REFERENCIA | CARGOS | ABONOS | SALDO (liquidación)"
+            "Cada fila representa un movimiento bancario individual."
+            "\n\n"
+            "INSTRUCCIONES DE EXTRACCIÓN:"
+            "1. IDENTIFICA las columnas por posición exacta:"
+            "   - FECHA: Primera columna (formato: DD/MMM)"
+            "   - COD.: Segunda columna (códigos como T20, N06, T17, AA7, C02, etc.)"
+            "   - DESCRIPCIÓN: Tercera columna (descripción completa del movimiento)"
+            "   - REFERENCIA: Cuarta columna (números de referencia)"
+            "   - CARGOS: Quinta columna (montos de cargos/egresos)"
+            "   - ABONOS: Sexta columna (montos de abonos/ingresos)"
+            "   - SALDO: Séptima columna (saldo de liquidación)"
+            "\n\n"
+            "2. ANÁLISIS POR POSICIÓN EXACTA:"
+            "   - Mira la posición VERTICAL y HORIZONTAL de cada valor"
+            "   - Si hay un monto en la columna CARGOS → monto_cargo"
+            "   - Si hay un monto en la columna ABONOS → monto_abono"
+            "   - NUNCA uses ambos campos a la vez"
+            "   - Si no hay monto en ninguna columna, usa null"
+            "\n\n"
+            "3. EXTRACCIÓN DE CONCEPTOS:"
+            "   - Extrae la descripción COMPLETA de la columna DESCRIPCIÓN"
+            "   - Incluye toda la información: banco, folios, nombres, etc."
+            "   - NO trunques la descripción, mantén toda la información"
+            "   - Ejemplo: 'T20 SPEI RECIBIDOAFIRME 0000001COMPRA DE POLIZA OFACTURE Ref. 0172083034 062 00062890010121093X14 050501150102501943980257505328'"
+            "\n\n"
+            "4. REGLAS ESPECÍFICAS:"
+            "   - El SALDO debe ser el de la columna SALDO (liquidación), NO el monto del movimiento"
+            "   - Algunos movimientos pueden tener saldo nulo (N/A)"
+            "   - Para REFERENCIA: extrae números como 'Ref. 123456' o códigos BNET"
+            "   - Devuelve montos como número sin comas ni símbolos de moneda"
+            "   - IMPORTANTE: La mayoría de movimientos con saldo son ABONOS, no cargos"
+            "\n\n"
+            "5. VALIDACIÓN DE DATOS:"
+            "   - Verifica que cada movimiento tenga fecha válida"
+            "   - Asegúrate de que el concepto esté completo"
+            "   - Valida que la referencia sea correcta"
+            "   - Confirma que solo haya UN monto (cargo O abono)"
+            "   - Verifica que el saldo sea de liquidación, no de operación"
+            "\n\n"
+            "6. FILTRADO:"
+            "   - NO incluyas líneas con 'DETALLE', 'TOTAL', 'SALDO', 'OPER', 'LIQ'"
+            "   - Cada fila de la tabla debe ser un movimiento separado"
+            "   - NO dupliques movimientos con la misma fecha, concepto y referencia"
+            "\n\n"
+            "Responde SOLO con JSON válido como array de objetos: "
+            "[{\"fecha\": \"01/MAY\", \"codigo\": \"T20\", \"descripcion\": \"SPEI RECIBIDOAFIRME 0000001COMPRA DE POLIZA OFACTURE Ref. 0172083034 062 00062890010121093X14 050501150102501943980257505328\", \"referencia\": \"0172083034\", \"monto_cargo\": null, \"monto_abono\": 275.00, \"saldo\": 580833.90}]"
+        )
+
+    def _convertir_pdf_a_imagenes(self, pdf_path: str, dpi: int = 300) -> List[bytes]:
+        """Convierte PDF a imágenes de alta calidad y las guarda en carpeta 'images'."""
+        try:
+            import fitz  # PyMuPDF
+        except ImportError:
+            logger.error("❌ PyMuPDF no está instalado. Instala con: pip install PyMuPDF")
+            return []
+
+        # Crear directorio de imágenes si no existe
+        images_dir = os.path.join(os.path.dirname(pdf_path), "images")
+        os.makedirs(images_dir, exist_ok=True)
+        
+        # Limpiar imágenes anteriores
+        for old_file in os.listdir(images_dir):
+            if old_file.endswith('.png'):
+                os.remove(os.path.join(images_dir, old_file))
+
+        doc = fitz.open(pdf_path)
+        imagenes_bytes = []
+        
+        logger.info(f"🖼️ Convirtiendo PDF a imágenes (DPI: {dpi})...")
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            
+            # Calcular matriz de escala para el DPI deseado (más alto para mejor calidad)
+            zoom = dpi / 72  # 72 es el DPI estándar de PDF
+            mat = fitz.Matrix(zoom, zoom)
+            
+            # Renderizar página como imagen con mejor calidad
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            
+            # Guardar imagen en disco para inspección
+            image_filename = f"pagina_{page_num + 1:03d}.png"
+            image_path = os.path.join(images_dir, image_filename)
+            pix.save(image_path)
+            
+            # Convertir a bytes para procesamiento
+            img_bytes = pix.tobytes("png")
+            imagenes_bytes.append(img_bytes)
+            
+            logger.info(f"✅ Página {page_num + 1} guardada: {image_path} ({len(img_bytes)} bytes)")
+        
+        doc.close()
+        
+        logger.info(f"🎯 Conversión completada: {len(imagenes_bytes)} imágenes guardadas en '{images_dir}'")
+        return imagenes_bytes
+
+    def _preprocesar_imagen_cv2(self, image_bytes: bytes) -> Optional[bytes]:
+        """Preprocesa con OpenCV para mejorar legibilidad de texto (contraste alto: fondo negro, texto blanco)."""
+        try:
+            import numpy as np  # type: ignore
+            import cv2  # type: ignore
+            arr = np.frombuffer(image_bytes, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None:
+                return None
+            
+            # Convertir a escala de grises
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # CLAHE para mejorar contraste local (más agresivo)
+            clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+            cl = clahe.apply(gray)
+            
+            # Suavizado para reducir ruido
+            blur = cv2.GaussianBlur(cl, (3, 3), 0)
+            
+            # Umbral adaptativo para binarizar (fondo negro, texto blanco)
+            thr = cv2.adaptiveThreshold(
+                blur,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY_INV,  # Invertir para fondo negro, texto blanco
+                15,
+                5,
+            )
+            
+            # Operaciones morfológicas para limpiar y engrosar texto
+            # Cierre para conectar componentes de texto
+            kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            proc = cv2.morphologyEx(thr, cv2.MORPH_CLOSE, kernel_close, iterations=1)
+            
+            # Apertura para eliminar ruido pequeño
+            kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+            proc = cv2.morphologyEx(proc, cv2.MORPH_OPEN, kernel_open, iterations=1)
+            
+            # Dilatación ligera para engrosar texto
+            kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+            proc = cv2.dilate(proc, kernel_dilate, iterations=1)
+            
+            # Invertir de vuelta para texto negro sobre fondo blanco (más legible para OCR)
+            proc = cv2.bitwise_not(proc)
+            
+            ok, encoded = cv2.imencode('.png', proc)
+            if not ok:
+                return None
+            return encoded.tobytes()
+        except Exception:
+            return None
+
+    def _mejorar_imagen(self, image_bytes: bytes, page_num: int = None) -> bytes:
+        """Mejora contraste y calidad de imagen usando PIL con parámetros optimizados."""
+        try:
+            from PIL import Image, ImageOps, ImageEnhance
+            import io
+            
+            # Abrir imagen desde bytes
+            im = Image.open(io.BytesIO(image_bytes))
+            
+            # Convertir a RGB si es necesario
+            if im.mode != 'RGB':
+                im = im.convert('RGB')
+            
+            # Convertir a escala de grises para mejor procesamiento
+            im = im.convert("L")
+            
+            # Autocontraste más agresivo para mejorar legibilidad
+            im = ImageOps.autocontrast(im, cutoff=3)
+            
+            # Aumentar contraste significativamente
+            im = ImageEnhance.Contrast(im).enhance(2.0)
+            
+            # Aumentar brillo ligeramente
+            im = ImageEnhance.Brightness(im).enhance(1.2)
+            
+            # Aumentar nitidez para texto más claro
+            im = ImageEnhance.Sharpness(im).enhance(1.5)
+            
+            # Guardar imagen mejorada en disco si tenemos número de página
+            if page_num is not None:
+                # Buscar el directorio images en el directorio del PDF
+                current_dir = os.getcwd()
+                images_dir = os.path.join(current_dir, "images")
+                if not os.path.exists(images_dir):
+                    # Intentar crear en el directorio actual
+                    images_dir = "images"
+                
+                os.makedirs(images_dir, exist_ok=True)
+                improved_path = os.path.join(images_dir, f"pagina_{page_num:03d}_mejorada.png")
+                im.save(improved_path, "PNG", optimize=True)
+                logger.info(f"✨ Imagen mejorada guardada: {improved_path}")
+            
+            # Guardar como PNG optimizado
+            buf = io.BytesIO()
+            im.save(buf, format="PNG", optimize=True, quality=95)
+            return buf.getvalue()
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Error mejorando imagen: {e}")
+            return image_bytes
+
+    def _resolver_cargo_abono(self, codigo: Optional[str], descripcion: Optional[str], cargos: Optional[float], abonos: Optional[float]) -> tuple[Optional[float], Optional[float]]:
+        """Aplica reglas BBVA basadas SOLO en posición de columnas, no en palabras clave."""
+        # Si ambos están presentes, usar la posición de columnas
+        if cargos is not None and abonos is not None:
+            # Si hay monto en columna CARGOS, es cargo
+            if cargos > 0:
+                return abs(cargos), None
+            # Si hay monto en columna ABONOS, es abono
+            elif abonos > 0:
+                return None, abs(abonos)
+            # Si ambos son 0 o null, no hay movimiento válido
+            else:
+                return None, None
+        
+        # Si solo uno está presente, normalizar a positivo
+        if cargos is not None and cargos > 0:
+            return abs(cargos), None
+        if abonos is not None and abonos > 0:
+            return None, abs(abonos)
+
+        return None, None
+
+    def _mapear_campos_movimiento_bbva_imagen(self, mov: Dict[str, Any]) -> Dict[str, Any]:
+        """Mapea un movimiento del esquema de imágenes BBVA al interno (fecha, concepto, referencia, cargos, abonos, saldo)."""
+        try:
+            if not mov or not isinstance(mov, dict):
+                logger.warning("⚠️ Movimiento inválido para mapeo BBVA")
+                return {}
+            
+            fecha = mov.get('fecha') or mov.get('FECHA')
+            codigo = mov.get('codigo') or mov.get('COD') or mov.get('OPER') or mov.get('COD.')
+            descripcion = mov.get('descripcion') or mov.get('DESCRIPCION') or mov.get('DESCRIPCIÓN') or mov.get('concepto')
+            referencia = mov.get('referencia') or mov.get('REFERENCIA')
+            saldo_raw = mov.get('saldo') or mov.get('SALDO')
+            monto_cargo = mov.get('monto_cargo') or mov.get('CARGOS') or mov.get('cargos')
+            monto_abono = mov.get('monto_abono') or mov.get('ABONOS') or mov.get('abonos')
+
+            def _to_float(x):
+                if x is None or x == "":
+                    return None
+                try:
+                    # Limpiar símbolos de moneda y comas
+                    x_str = str(x).replace('$', '').replace(',', '').replace(' ', '').strip()
+                    return float(x_str)
+                except Exception:
+                    return None
+
+            def _extraer_referencia(desc: str) -> str:
+                """Extrae referencia de la descripción si no está en campo separado."""
+                if referencia:
+                    return referencia
+                
+                if not desc:
+                    return ""
+                
+                # Buscar patrones de referencia en la descripción
+                import re
+                # Patrón para "Ref. 123456"
+                ref_match = re.search(r'Ref\.\s*(\d+)', desc, re.IGNORECASE)
+                if ref_match:
+                    return ref_match.group(1)
+                
+                # Patrón para "BNET 123456789"
+                bnet_match = re.search(r'BNET\s+(\d+)', desc, re.IGNORECASE)
+                if bnet_match:
+                    return bnet_match.group(1)
+                
+                # Patrón para números largos al final
+                num_match = re.search(r'(\d{8,})$', desc)
+                if num_match:
+                    return num_match.group(1)
+                
+                return ""
+
+            def _limpiar_concepto(desc: str, codigo: str) -> str:
+                """Limpia y mejora el concepto manteniendo toda la información importante."""
+                if not desc:
+                    return codigo or ""
+                
+                # Si el código está al inicio de la descripción, mantenerlo
+                desc_limpia = str(desc).strip()
+                
+                # Asegurar que el código esté al inicio si no está
+                if codigo and not desc_limpia.startswith(codigo):
+                    desc_limpia = f"{codigo} {desc_limpia}"
+                
+                # Mantener toda la información, no truncar
+                return desc_limpia
+
+            cargos = _to_float(monto_cargo)
+            abonos = _to_float(monto_abono)
+            saldo = _to_float(saldo_raw)
+
+            # Construir concepto completo
+            concepto = _limpiar_concepto(descripcion, codigo)
+
+            # Extraer referencia si no está presente
+            referencia_final = _extraer_referencia(concepto)
+
+            # Usar SOLO posición de columnas para determinar cargo/abono
+            cargos, abonos = self._resolver_cargo_abono(codigo, descripcion, cargos, abonos)
+
+            return {
+                'fecha': fecha,
+                'concepto': concepto,
+                'referencia': referencia_final,
+                'cargos': cargos,
+                'abonos': abonos,
+                'saldo': saldo,  # Este es el saldo de liquidación
+            }
+        except Exception as e:
+            logger.warning(f"⚠️ Error mapeando movimiento BBVA: {e}")
+            return {
+                'fecha': mov.get('fecha') if mov else None,
+                'concepto': mov.get('descripcion') or mov.get('concepto') if mov else None,
+                'referencia': mov.get('referencia') if mov else None,
+                'cargos': None,
+                'abonos': None,
+                'saldo': None,
+            }
+
+    def _parsear_json_bbva_imagenes(self, response_text: str) -> List[Dict[str, Any]]:
+        """Parsea respuesta JSON del flujo por imágenes BBVA y la mapea a formato interno."""
+        try:
+            if not response_text:
+                logger.warning("⚠️ Respuesta vacía de Gemini")
+                return []
+            
+            txt = response_text.strip()
+            if txt.startswith('```json'):
+                txt = txt[7:]
+            if txt.endswith('```'):
+                txt = txt[:-3]
+            txt = txt.strip()
+            
+            if not txt:
+                logger.warning("⚠️ Texto JSON vacío después de limpieza")
+                return []
+            
+            data = json.loads(txt)
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Error parseando JSON BBVA: {e}")
+            logger.error(f"📄 Texto problemático: {response_text[:200]}...")
+            return []
+        except Exception as e:
+            logger.error(f"❌ Error inesperado parseando JSON BBVA: {e}")
+            return []
+
+        movimientos: List[Dict[str, Any]] = []
+        try:
+            rows: List[Dict[str, Any]]
+            if isinstance(data, list):
+                rows = data
+            elif isinstance(data, dict) and isinstance(data.get('movimientos'), list):
+                rows = data['movimientos']
+            elif isinstance(data, dict):
+                # Intentar encontrar cualquier lista en el diccionario
+                rows = []
+                for key, value in data.items():
+                    if isinstance(value, list) and value:
+                        rows = value
+                        break
+                if not rows:
+                    logger.warning("⚠️ No se encontró lista de movimientos en respuesta")
+                    return []
+            else:
+                logger.warning(f"⚠️ Formato de respuesta inesperado: {type(data)}")
+                return []
+            
+            if not rows:
+                logger.warning("⚠️ Lista de movimientos vacía")
+                return []
+            
+            for mov in rows:
+                if not isinstance(mov, dict):
+                    logger.warning(f"⚠️ Movimiento no es diccionario: {type(mov)}")
+                    continue
+                
+                try:
+                    movimiento_mapeado = self._mapear_campos_movimiento_bbva_imagen(mov)
+                    if movimiento_mapeado:
+                        movimientos.append(movimiento_mapeado)
+                except Exception as e:
+                    logger.warning(f"⚠️ Error mapeando movimiento: {e}")
+                    continue
+            
+            logger.info(f"✅ Parseados {len(movimientos)} movimientos BBVA")
+            return movimientos
+            
+        except Exception as e:
+            logger.error(f"❌ Error procesando movimientos BBVA: {e}")
+            return []
+
+    def _procesar_bbva_por_imagenes(self, pdf_path: str) -> Dict[str, Any]:
+        """Procesa un PDF BBVA convirtiéndolo a imágenes y usando Gemini multimodal en lotes."""
+        inicio = time.time()
+        logger.info("🖼️ Iniciando procesamiento BBVA por imágenes...")
+        
+        try:
+            imagenes = self._convertir_pdf_a_imagenes(pdf_path, dpi=300)
+            if not imagenes:
+                return self._crear_respuesta_error("No se pudieron generar imágenes del PDF")
+
+            # Mostrar el prompt que se va a usar
+            instruccion_bbva = self._instruction_bbva_imagenes()
+            logger.info("🔍 PROMPT BBVA UTILIZADO:")
+            logger.info("=" * 80)
+            logger.info(instruccion_bbva)
+            logger.info("=" * 80)
+
+            # Mejorar contraste y preparar lotes
+            imagenes_mejoradas = []
+            for i, img_bytes in enumerate(imagenes):
+                img_mejorada = self._mejorar_imagen(img_bytes, page_num=i+1)
+                imagenes_mejoradas.append(img_mejorada)
+
+            # Usar modelo flash para imágenes
+            self.model_id = "gemini-2.5-flash"
+            
+            movimientos_total: List[Dict[str, Any]] = []
+            errores: List[str] = []
+
+            # Procesar en lotes pequeños para no exceder límites
+            batch_size = 3
+            for i in range(0, len(imagenes_mejoradas), batch_size):
+                lote = imagenes_mejoradas[i:i+batch_size]
+                logger.info(f"🔄 Procesando lote {i//batch_size + 1}: imágenes {i+1}-{min(i+batch_size, len(imagenes_mejoradas))}")
+                
+                try:
+                    contents = [
+                        types.Content(
+                            role="user",
+                            parts=[
+                                types.Part.from_text(text=instruccion_bbva),
+                                *[types.Part.from_bytes(mime_type="image/png", data=img) for img in lote],
+                            ],
+                        )
+                    ]
+
+                    response = self.client.models.generate_content(
+                        model=self.model_id,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            temperature=0.1,
+                            response_mime_type="application/json",
+                        ),
+                    )
+
+                    if not response or not getattr(response, 'text', None):
+                        logger.warning(f"⚠️ Lote {i//batch_size + 1}: Respuesta vacía de Gemini")
+                        continue
+                        
+                    response_text = response.text
+                    if not response_text:
+                        logger.warning(f"⚠️ Lote {i//batch_size + 1}: Texto de respuesta vacío")
+                        continue
+                        
+                    movimientos_lote = self._parsear_json_bbva_imagenes(response_text)
+                    if movimientos_lote:
+                        movimientos_total.extend(movimientos_lote)
+                        logger.info(f"✅ Lote {i//batch_size + 1}: {len(movimientos_lote)} movimientos extraídos")
+                    else:
+                        logger.warning(f"⚠️ Lote {i//batch_size + 1}: No se pudieron parsear movimientos")
+                        
+                except Exception as e:
+                    error_msg = f"Error en lote {i//batch_size + 1}: {e}"
+                    logger.error(f"❌ {error_msg}")
+                    errores.append(error_msg)
+                    continue
+
+            movimientos_consolidados = self._consolidar_movimientos(movimientos_total)
+
+            # Validar y corregir movimientos BBVA
+            movimientos_consolidados = self._validar_y_corregir_movimientos_bbva(movimientos_consolidados)
+
+            # Intentar inferir cargos/abonos faltantes usando variación de saldo
+            movimientos_consolidados = self._inferir_cargos_abonos_por_saldo(movimientos_consolidados)
+
+            tiempo_procesamiento = time.time() - inicio
+            logger.info(f"✅ Procesamiento BBVA completado: {len(movimientos_consolidados)} movimientos en {tiempo_procesamiento:.2f}s")
+
+            return {
+                'exito': True,
+                'mensaje': f"PDF BBVA procesado por imágenes: {len(movimientos_consolidados)} movimientos extraídos",
+                'banco_detectado': 'BBVA',
+                'periodo_detectado': None,
+                'total_movimientos_extraidos': len(movimientos_consolidados),
+                'movimientos': movimientos_consolidados,
+                'modelo_utilizado': self.model_id,
+                'tiempo_procesamiento_segundos': round(tiempo_procesamiento, 2),
+                'errores': errores,
+            }
+        except Exception as e:
+            logger.error(f"❌ Error en flujo BBVA por imágenes: {e}")
+            return self._crear_respuesta_error(f"Error en flujo BBVA por imágenes: {e}")
+
+    def _inferir_cargos_abonos_por_saldo(self, movimientos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rellena cargos/abonos faltantes en base al cambio de saldo secuencial."""
+        if not movimientos:
+            return movimientos
+        prev_saldo: Optional[float] = None
+        for mov in movimientos:
+            try:
+                saldo = mov.get('saldo')
+                cargos = mov.get('cargos')
+                abonos = mov.get('abonos')
+                # Solo inferir si ambos están vacíos y hay saldo previo
+                if prev_saldo is not None and saldo is not None and cargos is None and abonos is None:
+                    delta = saldo - prev_saldo
+                    if delta > 0:
+                        mov['abonos'] = round(delta, 2)
+                    elif delta < 0:
+                        mov['cargos'] = round(abs(delta), 2)
+                # Actualizar previo si hay saldo válido (usar el saldo de liquidación)
+                if saldo is not None:
+                    prev_saldo = saldo
+            except Exception:
+                continue
+        return movimientos
     
     def _mejorar_deteccion_tipo_movimiento(self, concepto: str, tipo_actual: Optional[str] = None) -> str:
         """Mejora la detección del tipo de movimiento basado en el concepto."""
@@ -1494,4 +2031,114 @@ class GeminiProcessor:
             
         except Exception as e:
             logger.error(f"❌ Error procesando PDF grande: {e}")
-            return self._crear_respuesta_error(f"Error procesando PDF grande: {e}", time.time() - inicio) 
+            return self._crear_respuesta_error(f"Error procesando PDF grande: {e}", time.time() - inicio)
+
+    def _validar_y_corregir_movimientos_bbva(self, movimientos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Valida y corrige movimientos BBVA para asegurar extracción correcta de columnas y conceptos."""
+        if not movimientos:
+            return movimientos
+        
+        logger.info(f"🔍 Validando y corrigiendo {len(movimientos)} movimientos BBVA...")
+        
+        movimientos_corregidos = []
+        correcciones = 0
+        
+        for mov in movimientos:
+            try:
+                if not mov or not isinstance(mov, dict):
+                    logger.warning("⚠️ Movimiento inválido en validación BBVA")
+                    continue
+                
+                fecha = mov.get('fecha')
+                codigo = mov.get('codigo')
+                descripcion = mov.get('concepto') or mov.get('descripcion')
+                referencia = mov.get('referencia')
+                cargos = mov.get('cargos')
+                abonos = mov.get('abonos')
+                saldo = mov.get('saldo')
+                
+                # Validar fecha
+                if not fecha or not isinstance(fecha, str):
+                    logger.warning(f"⚠️ Movimiento sin fecha válida: {descripcion[:50] if descripcion else 'N/A'}")
+                    continue
+                
+                # Validar código
+                if not codigo or not isinstance(codigo, str):
+                    logger.warning(f"⚠️ Movimiento sin código válido: {fecha} - {descripcion[:50] if descripcion else 'N/A'}")
+                    continue
+                
+                # Validar descripción completa
+                if not descripcion or len(str(descripcion).strip()) < 10:
+                    logger.warning(f"⚠️ Descripción muy corta: {fecha} - {descripcion}")
+                    continue
+                
+                # Validar referencia
+                if not referencia or not isinstance(referencia, str):
+                    logger.warning(f"⚠️ Movimiento sin referencia: {fecha} - {descripcion[:50] if descripcion else 'N/A'}")
+                    continue
+                
+                # Validar montos
+                if cargos is None and abonos is None:
+                    logger.warning(f"⚠️ Movimiento sin montos: {fecha} - {descripcion[:50] if descripcion else 'N/A'}")
+                    continue
+                
+                if cargos is not None and abonos is not None:
+                    logger.warning(f"⚠️ Movimiento con ambos montos, corrigiendo: {fecha} - {descripcion[:50] if descripcion else 'N/A'}")
+                    # Si ambos están presentes, usar el que no sea 0
+                    if cargos == 0 or cargos is None:
+                        mov['cargos'] = None
+                    elif abonos == 0 or abonos is None:
+                        mov['abonos'] = None
+                    else:
+                        # Por defecto, si hay saldo, preferir abono
+                        if saldo is not None:
+                            mov['cargos'] = None
+                            logger.info(f"✅ Corregido: {fecha} - ABONO {abonos} (preferencia por saldo)")
+                        else:
+                            mov['abonos'] = None
+                            logger.info(f"✅ Corregido: {fecha} - CARGO {cargos}")
+                    correcciones += 1
+                
+                # Validar saldo
+                if saldo is not None and isinstance(saldo, str):
+                    if saldo.upper() in ['N/A', 'NULL', '']:
+                        mov['saldo'] = None
+                    else:
+                        try:
+                            # Limpiar saldo de símbolos de moneda y comas
+                            saldo_limpio = str(saldo).replace('$', '').replace(',', '').strip()
+                            mov['saldo'] = float(saldo_limpio)
+                        except ValueError:
+                            logger.warning(f"⚠️ Saldo inválido: {saldo} en {fecha}")
+                            mov['saldo'] = None
+                
+                # Validar montos numéricos
+                if cargos is not None:
+                    try:
+                        if isinstance(cargos, str):
+                            cargos_limpio = str(cargos).replace('$', '').replace(',', '').strip()
+                            mov['cargos'] = float(cargos_limpio)
+                    except ValueError:
+                        logger.warning(f"⚠️ Cargo inválido: {cargos} en {fecha}")
+                        mov['cargos'] = None
+                
+                if abonos is not None:
+                    try:
+                        if isinstance(abonos, str):
+                            abonos_limpio = str(abonos).replace('$', '').replace(',', '').strip()
+                            mov['abonos'] = float(abonos_limpio)
+                    except ValueError:
+                        logger.warning(f"⚠️ Abono inválido: {abonos} en {fecha}")
+                        mov['abonos'] = None
+                
+                movimientos_corregidos.append(mov)
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Error validando movimiento BBVA: {e}")
+                continue
+        
+        if correcciones > 0:
+            logger.info(f"✅ Corregidos {correcciones} movimientos")
+        
+        return movimientos_corregidos
+
