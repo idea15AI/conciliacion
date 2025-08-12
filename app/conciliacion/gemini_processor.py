@@ -6,6 +6,7 @@ import io
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import time
+from pathlib import Path
 
 from google import genai
 from google.genai import types
@@ -14,6 +15,9 @@ from app.core.config import settings
 
 
 logger = logging.getLogger(__name__)
+
+# Configuración para debug
+SAVE_DEBUG = False  # Cambiar a True para guardar imágenes de debug
 
 class GeminiProcessor:
     #Procesador de PDFs usando Google Gemini API con selección automática de modelo
@@ -45,89 +49,126 @@ class GeminiProcessor:
             return 1  # Valor por defecto
     
     def _detectar_banco_por_contenido_pdf(self, pdf_path: str) -> str:
-        """Detecta el banco basándose en el contenido del PDF."""
+        """Detecta el banco con reglas estrictas basadas en encabezados y patrones del PDF.
+        Ajuste: refuerza BANORTE cuando coexisten encabezados 'MONTO DEL DEPOSITO' y 'MONTO DEL RETIRO'.
+        """
         try:
-            # Extraer texto del PDF
-            texto_pdf = ""
             import fitz  # PyMuPDF
             doc = fitz.open(pdf_path)
-            for page in doc:
-                texto_pdf += page.get_text() + " "
+            texto_pdf = " ".join(page.get_text() for page in doc)
             doc.close()
             
-            # Detectar banco por palabras clave en el texto
-            texto_upper = texto_pdf.upper()
-            
-            # Detectar BBVA (prioridad máxima - más específico)
-            bbva_keywords = [
-                'BBVA', 'BANCO BBVA', 'CUENTA BBVA', 'BNET01002506200029230973',
-                'BNET01002506200029231831', 'BNET 0142201275', 'BNET 0193305422',
-                'BNET01002506200029231831', 'BNET01002506200029230973',
-                'FECHA SALDO OPER LIQ COD. DESCRIPCIÓN REFERENCIA CARGOS ABONOS OPERACIÓN LIQUIDACIÓN',
-                'OPER LIQ COD. DESCRIPCIÓN REFERENCIA CARGOS ABONOS OPERACIÓN LIQUIDACIÓN',
-                'BNET01002506200029230973', 'BNET01002506200029231831',
-                'SPEI ENVIADO BANREGIO', 'SPEI RECIBIDOBANORTE', 'SPEI RECIBIDOSANTANDER',
-                'PAGO CUENTA DE TERCERO', 'BNET 0142201275', 'BNET 0193305422',
-                'BBVA MEXICO, S.A., INSTITUCION DE BANCA MULTIPLE', 'BBVA MEXICO, S.A.',
-                'ESTADO DE CUENTA BBVA', 'CUENTA BBVA PYME', 'BBVA MEXICO, S.A., INSTITUCION DE BANCA MULTIPLE, GRUPO FINANCIERO BBVA MEXICO',
-                'MAESTRA PYME BBVA', 'BBVA MEXICO, S.A., INSTITUCION DE BANCA MULTIPLE, GRUPO FINANCIERO BBVA MEXICO',
-                'OPER LIQ COD.', 'FECHA SALDO', 'OPERACIÓN LIQUIDACIÓN', 'MAESTRA PYME BBVA'
+            texto = " ".join(texto_pdf.split()).upper()
+            nombre_archivo = os.path.basename(pdf_path).lower()
+
+            def score_contains(patterns: list[str], weight: int) -> int:
+                return sum(weight for p in patterns if p in texto)
+
+            # Scoring SANTANDER (encabezados fuertes)
+            score_sant = 0
+            score_sant += score_contains([
+                'DETALLE DE MOVIMIENTOS CUENTA DE CHEQUES',
+                'BANCO SANTANDER MEXICO',
+                'BANCO SANTANDER MEXICO S.A.',
+                'BANCO SANTANDER MEXICO S.A., INSTITUCION DE BANCA MULTIPLE'
+            ], 25)
+            score_sant += score_contains(['DEPOSITO EN EFECTIVO', 'PAGO TRANSFERENCIA SPEI', 'CARGO PAGO NOMINA'], 5)
+            score_sant += 20 if 'santander' in nombre_archivo else 0
+
+            # Scoring BBVA (evitar falsos positivos por disclaimer)
+            score_bbva = 0
+            score_bbva += score_contains([
+                'DETALLE DE MOVIMIENTOS REALIZADOS',
+                'BBVA MEXICO, S.A.',
+                'BBVA MEXICO, S.A., INSTITUCION DE BANCA MULTIPLE'
+            ], 20)
+            score_bbva += score_contains(['OPER LIQ COD.', 'CARGOS', 'ABONOS', 'LIQUIDACIÓN'], 3)
+            score_bbva += 15 if 'bbva' in nombre_archivo else 0
+
+            # Scoring BANORTE
+            score_banorte = 0
+            banorte_headers_strong = [
+                'ESTADO DE CUENTA BANORTE', 'BANCO BANORTE S.A.',
+                'BANCO BANORTE S.A., INSTITUCION DE BANCA MULTIPLE',
+                'GRUPO FINANCIERO BANORTE'
             ]
-            for keyword in bbva_keywords:
-                if keyword in texto_upper:
-                    logger.info(f"🏦 Detectado BBVA por palabra clave: {keyword}")
-                    return "BBVA"
-            
-            # Detectar SANTANDER (prioridad alta - más específico)
-            santander_keywords = [
-                'SANTANDER', 'CUENTA SANTANDER PYME', 'BANCO SANTANDER MEXICO',
-                'DETALLE DE MOVIMIENTOS CUENTA DE CHEQUES', 'CUENTA DE CHEQUES',
-                'CORPORACION INDUSTRIAL TEXDUO', 'BANCO SANTANDER MEXICO S.A.',
-                'CUENTA SANTANDER PYME 65-50573448-2', 'BANCO SANTANDER MEXICO S.A., INSTITUCION DE BANCA MULTIPLE',
-                'SALDO FINAL DEL PERIODO ANTERIOR', 'DEPOSITO EN EFECTIVO', 'CARGO PAGO NOMINA',
-                'PAGO TRANSFERENCIA SPEI', 'COM MEMBRESIA CUENTA E PYME', 'BANCO SANTANDER MEXICO S.A., INSTITUCION DE BANCA MULTIPLE, GRUPO FINANCIERO SANTANDER MEXICO'
-            ]
-            for keyword in santander_keywords:
-                if keyword in texto_upper:
-                    logger.info(f"🏦 Detectado SANTANDER por palabra clave: {keyword}")
-                    return "SANTANDER"
-            
-            # Detectar BANORTE (prioridad alta - más específico)
-            banorte_keywords = [
-                'BANORTE', 'CUENTA BANORTE', 'BANCO BANORTE', 'CUENTAS POR PAGAR - SAP',
-                'TRASPASO A CUENTA DE TERCEROS', 'COMPRA ORDEN DE PAGO SPEI',
-                'DEPOSITO DE CUENTA DE TERCEROS', 'SPEI RECIBIDO, BCO:',
-                'MONTO DEL DEPOSITO MONTO DEL RETIRO SALDO', 'BANCO BANORTE S.A., INSTITUCION DE BANCA MULTIPLE',
-                'ESTADO DE CUENTA BANORTE', 'CUENTA BANORTE PYME', 'BANCO BANORTE S.A.',
-                'FECHA DESCRIPCIÓN / ESTABLECIMIENTO MONTO DEL DEPOSITO MONTO DEL RETIRO SALDO',
-                'BANCO BANORTE S.A., INSTITUCION DE BANCA MULTIPLE, GRUPO FINANCIERO BANORTE'
-            ]
-            for keyword in banorte_keywords:
-                if keyword in texto_upper:
-                    logger.info(f"🏦 Detectado BANORTE por palabra clave: {keyword}")
-                    return "BANORTE"
-            
-            # Detectar INBURSA (prioridad media - más específico)
-            inbursa_keywords = [
-                'INBURSA', 'BANCO INBURSA', 'CUENTA INBURSA', 'TASA DE DESCTO',
-                'LIQUIDACION ADQUIRENTE', 'INTERESES GANADOS', 'BALANCE INICIAL',
-                'LIQUIDACION ADQ CREDITO', 'LIQUIDACION ADQ DEBITO',
-                'APLICACION DE TASAS DE DESCUENTO', 'DEPOSITO TEF',
-                'OPERADORA PAYPAL DE MEXICO', 'CUENTA 50058959195',
-                'BANCO INBURSA S.A., INSTITUCION DE BANCA MULTIPLE', 'BANCO INBURSA S.A.',
-                'ESTADO DE CUENTA INBURSA', 'CUENTA INBURSA PYME', 'BANCO INBURSA S.A., INSTITUCION DE BANCA MULTIPLE, GRUPO FINANCIERO INBURSA',
-                'INBURSA S.A., INSTITUCION DE BANCA MULTIPLE', 'INBURSA S.A.'
-            ]
-            for keyword in inbursa_keywords:
-                if keyword in texto_upper:
-                    logger.info(f"🏦 Detectado INBURSA por palabra clave: {keyword}")
-                    return "INBURSA"
-            
-            return "No detectado"
+            score_banorte += score_contains(banorte_headers_strong, 22)
+            # Señales de columnas propias de Banorte
+            tiene_dep = 'MONTO DEL DEPOSITO' in texto or 'MONTO DEL DEPÓSITO' in texto
+            tiene_ret = 'MONTO DEL RETIRO' in texto
+            tiene_desc = ('DESCRIPCIÓN / ESTABLECIMIENTO' in texto) or ('DESCRIPCION / ESTABLECIMIENTO' in texto) or ('DESCRIPCIÓN' in texto)
+            if tiene_dep:
+                score_banorte += 8
+            if tiene_ret:
+                score_banorte += 8
+            if tiene_desc:
+                score_banorte += 5
+            # Si aparecen juntos depósito y retiro, es una huella muy fuerte de Banorte
+            if tiene_dep and tiene_ret:
+                score_banorte += 20
+            # Claves adicionales frecuentes
+            score_banorte += score_contains(['CUENTAS POR PAGAR - SAP', 'TRASPASO A CUENTA DE TERCEROS', 'DEPOSITO DE CUENTA DE TERCEROS'], 6)
+            score_banorte += 15 if 'banorte' in nombre_archivo else 0
+
+            # Scoring INBURSA
+            score_inbursa = 0
+            score_inbursa += score_contains([
+                'ESTADO DE CUENTA INBURSA', 'BANCO INBURSA S.A.',
+                'BANCO INBURSA S.A., INSTITUCION DE BANCA MULTIPLE'
+            ], 20)
+            score_inbursa += score_contains(['TASA DE DESCTO', 'LIQUIDACION ADQUIRENTE'], 5)
+            score_inbursa += 15 if 'inbursa' in nombre_archivo else 0
+
+            # Scoring BAJIO
+            score_bajio = 0
+            score_bajio += score_contains([
+                'BANCO DEL BAJIO', 'BANCO DEL BAJÍO', 'BANCO DEL BAJIO S.A.',
+                'BANCO DEL BAJÍO S.A.'
+            ], 22)
+            # Señales de columnas muy comunes en su formato
+            score_bajio += score_contains(['DESCRIPCION DE LA OPERACION', 'NO.REF'], 4)
+            score_bajio += 12 if 'bajio' in nombre_archivo else 0
+
+            scores = {
+                'SANTANDER': score_sant,
+                'BBVA': score_bbva,
+                'BANORTE': score_banorte,
+                'INBURSA': score_inbursa,
+                'BAJIO': score_bajio,
+            }
+
+            # Regla dura: si aparece el encabezado de SANTANDER, priorizar SANTANDER sobre BBVA
+            if 'DETALLE DE MOVIMIENTOS CUENTA DE CHEQUES' in texto:
+                logger.info('🏦 Encabezado fuerte de SANTANDER detectado, priorizando SANTANDER')
+                return 'SANTANDER'
+
+            # Regla adicional: si coexisten las columnas MONTO DEL DEPOSITO y MONTO DEL RETIRO y
+            # no hay encabezado fuerte de otro banco, devolver BANORTE directamente
+            if tiene_dep and tiene_ret and 'DETALLE DE MOVIMIENTOS CUENTA DE CHEQUES' not in texto and 'DETALLE DE MOVIMIENTOS REALIZADOS' not in texto:
+                logger.info('🏦 Huella de columnas Banorte detectada (DEPÓSITO + RETIRO). Clasificando como BANORTE')
+                return 'BANORTE'
+
+            # Elegir el banco con mayor puntaje si supera umbral
+            banco_top = max(scores, key=scores.get)
+            top_score = scores[banco_top]
+            second_score = max(v for k, v in scores.items() if k != banco_top)
+
+            logger.info(f"🏁 Scores bancos: {scores}")
+
+            # Umbral y margen mínimo para decisión (ligeramente relajado para Banorte)
+            umbral = 25
+            margen = 8
+            if banco_top == 'BANORTE':
+                umbral = 18
+                margen = 5
+            if top_score >= umbral and (top_score - second_score) >= margen:
+                return banco_top
+
+            return 'No detectado'
             
         except Exception as e:
             logger.error(f"❌ Error en detección por contenido: {e}")
-            return "No detectado"
+            return 'No detectado'
     
     def _determinar_modelo_por_paginas(self, num_paginas: int) -> str:
         #Determina qué modelo usar basado en el número de páginas.
@@ -319,6 +360,27 @@ class GeminiProcessor:
                 resultado_bbva['tiempo_procesamiento_segundos'] = round(time.time() - inicio, 2)
                 resultado_bbva['modelo_utilizado'] = resultado_bbva.get('modelo_utilizado', self.model_id)
                 return resultado_bbva
+
+            # Si es SANTANDER, usar OCR local especializado
+            if banco_detectado_previo == "SANTANDER":
+                logger.info("🟥 SANTANDER detectado → usando OCR especializado local")
+                resultado_santander = self._procesar_santander_por_ocr(pdf_path)
+                resultado_santander['tiempo_procesamiento_segundos'] = round(time.time() - inicio, 2)
+                return resultado_santander
+
+            # Si es BANORTE, usar OCR local especializado
+            if banco_detectado_previo == "BANORTE":
+                logger.info("🟧 BANORTE detectado → usando OCR especializado local")
+                resultado_banorte = self._procesar_banorte_por_ocr(pdf_path)
+                resultado_banorte['tiempo_procesamiento_segundos'] = round(time.time() - inicio, 2)
+                return resultado_banorte
+
+            # Si es BAJIO, usar OCR local especializado
+            if banco_detectado_previo == "BAJIO":
+                logger.info("🟪 BAJÍO detectado → usando OCR especializado local")
+                resultado_bajio = self._procesar_bajio_por_ocr(pdf_path)
+                resultado_bajio['tiempo_procesamiento_segundos'] = round(time.time() - inicio, 2)
+                return resultado_bajio
 
             # Modo forzado: extraer TODO el texto y enviarlo a Gemini con el prompt específico
             if forzar_gemini:
@@ -716,53 +778,25 @@ class GeminiProcessor:
             return "No detectado"
 
     def _detectar_banco_por_texto(self, response_text: str) -> str:
-        """Detecta el banco basándose en el texto de respuesta de Gemini."""
+        """Detección estricta basada en texto plano de respuesta (fallback)."""
         try:
-            response_upper = response_text.upper()
-            
-            # Detectar SANTANDER por palabras clave específicas
-            if any(palabra in response_upper for palabra in [
-                'SANTANDER', 'CUENTA SANTANDER PYME', 'BANCO SANTANDER MEXICO',
-                'DETALLE DE MOVIMIENTOS CUENTA DE CHEQUES', 'DEPOSITO EN EFECTIVO',
-                'CARGO PAGO NOMINA', 'PAGO TRANSFERENCIA SPEI', 'CUENTA DE CHEQUES',
-                'CORPORACION INDUSTRIAL TEXDUO', 'BANCO SANTANDER MEXICO S.A.',
-                'CUENTA SANTANDER PYME 65-50573448-2', 'SALDO FINAL DEL PERIODO ANTERIOR',
-                'CARGO PAGO NOMINA POR APLICAR', 'PAGO TRANSFERENCIA SPEI HORA',
-                'COM MEMBRESIA CUENTA E PYME MEMBRESIA'
-            ]):
-                return "SANTANDER"
-            
-            # Detectar BANORTE por palabras clave
-            if any(palabra in response_upper for palabra in [
-                'BANORTE', 'CUENTA BANORTE', 'BANCO BANORTE', 'SPEI RECIBIDO',
-                'DEPOSITO DE CUENTA DE TERCEROS', 'TRASPASO A CUENTA DE TERCEROS',
-                'COMPRA ORDEN DE PAGO SPEI', 'CUENTAS POR PAGAR - SAP'
-            ]):
-                return "BANORTE"
-            
-            # Detectar BBVA por palabras clave
-            if any(palabra in response_upper for palabra in [
-                'BBVA', 'BANCO BBVA', 'CUENTA BBVA', 'COM TRANSACCIONES BNTC',
-                'IVA COM TRANSACCIONE BNTC', 'COM SERV BBVA NET CAS',
-                'IVA COM SERVICIOS BNTC', 'DETALLE DE MOVIMIENTOS REALIZADOS'
-            ]):
-                return "BBVA"
-            
-            # Detectar INBURSA por palabras clave
-            if any(palabra in response_upper for palabra in [
-                'INBURSA', 'BANCO INBURSA', 'CUENTA INBURSA', 'TASA DE DESCTO',
-                'LIQUIDACION ADQUIRENTE', 'INTERESES GANADOS', 'BALANCE INICIAL',
-                'LIQUIDACION ADQ CREDITO', 'LIQUIDACION ADQ DEBITO',
-                'APLICACION DE TASAS DE DESCUENTO', 'DEPOSITO TEF',
-                'OPERADORA PAYPAL DE MEXICO'
-            ]):
-                return "INBURSA"
-            
-            return "No detectado"
-            
+            t = " ".join(response_text.split()).upper()
+
+            def has_any(keys: list[str]) -> bool:
+                return any(k in t for k in keys)
+
+            if 'DETALLE DE MOVIMIENTOS CUENTA DE CHEQUES' in t or has_any(['BANCO SANTANDER MEXICO', 'CUENTA SANTANDER']):
+                return 'SANTANDER'
+            if has_any(['ESTADO DE CUENTA BANORTE', 'MONTO DEL DEPOSITO', 'MONTO DEL RETIRO', 'BANCO BANORTE']):
+                return 'BANORTE'
+            if has_any(['DETALLE DE MOVIMIENTOS REALIZADOS', 'BBVA MEXICO, S.A.']):
+                return 'BBVA'
+            if has_any(['ESTADO DE CUENTA INBURSA', 'BANCO INBURSA S.A.', 'TASA DE DESCTO']):
+                return 'INBURSA'
+            return 'No detectado'
         except Exception as e:
             logger.error(f"❌ Error detectando banco por texto: {e}")
-            return "No detectado"
+            return 'No detectado'
 
     def _filtrar_movimientos_validos(self, movimientos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filtra movimientos válidos, eliminando líneas de resumen y totales."""
@@ -1755,107 +1789,140 @@ class GeminiProcessor:
             return []
 
     def _procesar_bbva_por_imagenes(self, pdf_path: str) -> Dict[str, Any]:
-        """Procesa un PDF BBVA convirtiéndolo a imágenes y usando Gemini multimodal en lotes."""
+        """Procesa un PDF BBVA usando el nuevo flujo de OCR optimizado."""
         inicio = time.time()
-        logger.info("🖼️ Iniciando procesamiento BBVA por imágenes...")
+        logger.info("🖼️ Iniciando procesamiento BBVA con nuevo OCR...")
         
         try:
-            imagenes = self._convertir_pdf_a_imagenes(pdf_path, dpi=300)
-            if not imagenes:
-                return self._crear_respuesta_error("No se pudieron generar imágenes del PDF")
-
-            # Mostrar el prompt que se va a usar
-            instruccion_bbva = self._instruction_bbva_imagenes()
-            logger.info("🔍 PROMPT BBVA UTILIZADO:")
-            logger.info("=" * 80)
-            logger.info(instruccion_bbva)
-            logger.info("=" * 80)
-
-            # Mejorar contraste y preparar lotes
-            imagenes_mejoradas = []
-            for i, img_bytes in enumerate(imagenes):
-                img_mejorada = self._mejorar_imagen(img_bytes, page_num=i+1)
-                imagenes_mejoradas.append(img_mejorada)
-
-            # Usar modelo flash para imágenes
-            self.model_id = "gemini-2.5-flash"
+            # Importar el nuevo procesador BBVA
+            from .bbvaocr import process_bbva_pdf
             
-            movimientos_total: List[Dict[str, Any]] = []
-            errores: List[str] = []
+            # Crear directorio de debug si es necesario
+            debug_dir = None
+            if SAVE_DEBUG:
+                import os
+                debug_dir = os.path.join(os.path.dirname(pdf_path), "debug_bbva")
+                os.makedirs(debug_dir, exist_ok=True)
+                debug_dir = Path(debug_dir)
+            
+            # Procesar con el nuevo OCR
+            resultado_bbva = process_bbva_pdf(pdf_path, debug_dir=debug_dir)
+            
+            if not resultado_bbva.get('exito', False):
+                logger.warning(f"⚠️ Error en OCR BBVA: {resultado_bbva.get('mensaje', 'Error desconocido')}")
+                return self._crear_respuesta_error(f"Error en OCR BBVA: {resultado_bbva.get('mensaje', 'Error desconocido')}")
+            
+            # Usar directamente los movimientos retornados por el OCR BBVA
+            movimientos = resultado_bbva.get('movimientos', [])
+            if not movimientos:
+                logger.warning("⚠️ OCR BBVA devolvió 0 movimientos")
+                return self._crear_respuesta_error("OCR BBVA devolvió 0 movimientos")
 
-            # Procesar en lotes pequeños para no exceder límites
-            batch_size = 3
-            for i in range(0, len(imagenes_mejoradas), batch_size):
-                lote = imagenes_mejoradas[i:i+batch_size]
-                logger.info(f"🔄 Procesando lote {i//batch_size + 1}: imágenes {i+1}-{min(i+batch_size, len(imagenes_mejoradas))}")
-                
-                try:
-                    contents = [
-                        types.Content(
-                            role="user",
-                            parts=[
-                                types.Part.from_text(text=instruccion_bbva),
-                                *[types.Part.from_bytes(mime_type="image/png", data=img) for img in lote],
-                            ],
-                        )
-                    ]
-
-                    response = self.client.models.generate_content(
-                        model=self.model_id,
-                        contents=contents,
-                        config=types.GenerateContentConfig(
-                            temperature=0.1,
-                            response_mime_type="application/json",
-                        ),
-                    )
-
-                    if not response or not getattr(response, 'text', None):
-                        logger.warning(f"⚠️ Lote {i//batch_size + 1}: Respuesta vacía de Gemini")
-                        continue
-                        
-                    response_text = response.text
-                    if not response_text:
-                        logger.warning(f"⚠️ Lote {i//batch_size + 1}: Texto de respuesta vacío")
-                        continue
-                        
-                    movimientos_lote = self._parsear_json_bbva_imagenes(response_text)
-                    if movimientos_lote:
-                        movimientos_total.extend(movimientos_lote)
-                        logger.info(f"✅ Lote {i//batch_size + 1}: {len(movimientos_lote)} movimientos extraídos")
-                    else:
-                        logger.warning(f"⚠️ Lote {i//batch_size + 1}: No se pudieron parsear movimientos")
-                        
-                except Exception as e:
-                    error_msg = f"Error en lote {i//batch_size + 1}: {e}"
-                    logger.error(f"❌ {error_msg}")
-                    errores.append(error_msg)
-                    continue
-
-            movimientos_consolidados = self._consolidar_movimientos(movimientos_total)
-
-            # Validar y corregir movimientos BBVA
-            movimientos_consolidados = self._validar_y_corregir_movimientos_bbva(movimientos_consolidados)
-
-            # Intentar inferir cargos/abonos faltantes usando variación de saldo
-            movimientos_consolidados = self._inferir_cargos_abonos_por_saldo(movimientos_consolidados)
-
+            # Consolidar movimientos al formato estándar del sistema
+            movimientos_consolidados = self._consolidar_movimientos(movimientos)
+            
             tiempo_procesamiento = time.time() - inicio
-            logger.info(f"✅ Procesamiento BBVA completado: {len(movimientos_consolidados)} movimientos en {tiempo_procesamiento:.2f}s")
-
+            logger.info(f"✅ Procesamiento BBVA con nuevo OCR completado: {len(movimientos_consolidados)} movimientos en {tiempo_procesamiento:.2f}s")
+            
             return {
                 'exito': True,
-                'mensaje': f"PDF BBVA procesado por imágenes: {len(movimientos_consolidados)} movimientos extraídos",
+                'mensaje': f"PDF BBVA procesado con nuevo OCR: {len(movimientos_consolidados)} movimientos extraídos",
                 'banco_detectado': 'BBVA',
                 'periodo_detectado': None,
                 'total_movimientos_extraidos': len(movimientos_consolidados),
                 'movimientos': movimientos_consolidados,
-                'modelo_utilizado': self.model_id,
+                'modelo_utilizado': 'BBVA_OCR_Optimizado',
                 'tiempo_procesamiento_segundos': round(tiempo_procesamiento, 2),
-                'errores': errores,
+                'errores': [],
+            }
+            
+        except ImportError as e:
+            logger.error(f"❌ Error importando nuevo OCR BBVA: {e}")
+            return self._crear_respuesta_error(f"Error importando nuevo OCR BBVA: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error en flujo BBVA con nuevo OCR: {e}")
+            return self._crear_respuesta_error(f"Error en flujo BBVA con nuevo OCR: {e}")
+
+    def _procesar_santander_por_ocr(self, pdf_path: str) -> Dict[str, Any]:
+        """Procesa un PDF SANTANDER usando el OCR local especializado."""
+        inicio = time.time()
+        try:
+            from .santanderocr import process_santander_pdf
+            resultado = process_santander_pdf(pdf_path_in=pdf_path, save_debug=SAVE_DEBUG)
+            if not resultado.get('exito'):
+                return self._crear_respuesta_error(resultado.get('mensaje', 'Error OCR Santander'))
+            movimientos = resultado.get('movimientos', [])
+            if not movimientos:
+                return self._crear_respuesta_error('OCR Santander devolvió 0 movimientos')
+            movimientos_consolidados = self._consolidar_movimientos(movimientos)
+            return {
+                'exito': True,
+                'mensaje': f"PDF SANTANDER procesado: {len(movimientos_consolidados)} movimientos",
+                'banco_detectado': 'SANTANDER',
+                'periodo_detectado': None,
+                'total_movimientos_extraidos': len(movimientos_consolidados),
+                'movimientos': movimientos_consolidados,
+                'modelo_utilizado': 'SANTANDER_OCR',
+                'tiempo_procesamiento_segundos': round(time.time() - inicio, 2),
+                'errores': []
             }
         except Exception as e:
-            logger.error(f"❌ Error en flujo BBVA por imágenes: {e}")
-            return self._crear_respuesta_error(f"Error en flujo BBVA por imágenes: {e}")
+            logger.error(f"❌ Error en flujo SANTANDER OCR: {e}")
+            return self._crear_respuesta_error(f"Error en flujo SANTANDER OCR: {e}")
+
+    def _procesar_banorte_por_ocr(self, pdf_path: str) -> Dict[str, Any]:
+        """Procesa un PDF BANORTE usando el OCR local especializado."""
+        inicio = time.time()
+        try:
+            from .banorteocr import process_banorte_pdf
+            resultado = process_banorte_pdf(pdf_path_in=pdf_path, save_debug=SAVE_DEBUG)
+            if not resultado.get('exito'):
+                return self._crear_respuesta_error(resultado.get('mensaje', 'Error OCR Banorte'))
+            movimientos = resultado.get('movimientos', [])
+            if not movimientos:
+                return self._crear_respuesta_error('OCR Banorte devolvió 0 movimientos')
+            movimientos_consolidados = self._consolidar_movimientos(movimientos)
+            return {
+                'exito': True,
+                'mensaje': f"PDF BANORTE procesado: {len(movimientos_consolidados)} movimientos",
+                'banco_detectado': 'BANORTE',
+                'periodo_detectado': None,
+                'total_movimientos_extraidos': len(movimientos_consolidados),
+                'movimientos': movimientos_consolidados,
+                'modelo_utilizado': 'BANORTE_OCR',
+                'tiempo_procesamiento_segundos': round(time.time() - inicio, 2),
+                'errores': []
+            }
+        except Exception as e:
+            logger.error(f"❌ Error en flujo BANORTE OCR: {e}")
+            return self._crear_respuesta_error(f"Error en flujo BANORTE OCR: {e}")
+
+    def _procesar_bajio_por_ocr(self, pdf_path: str) -> Dict[str, Any]:
+        """Procesa un PDF BAJÍO usando el OCR local especializado."""
+        inicio = time.time()
+        try:
+            from .bajioocr import process_bajio_pdf
+            resultado = process_bajio_pdf(pdf_path_in=pdf_path, save_debug=SAVE_DEBUG)
+            if not resultado.get('exito'):
+                return self._crear_respuesta_error(resultado.get('mensaje', 'Error OCR Bajío'))
+            movimientos = resultado.get('movimientos', [])
+            if not movimientos:
+                return self._crear_respuesta_error('OCR Bajío devolvió 0 movimientos')
+            movimientos_consolidados = self._consolidar_movimientos(movimientos)
+            return {
+                'exito': True,
+                'mensaje': f"PDF BAJÍO procesado: {len(movimientos_consolidados)} movimientos",
+                'banco_detectado': 'BAJIO',
+                'periodo_detectado': None,
+                'total_movimientos_extraidos': len(movimientos_consolidados),
+                'movimientos': movimientos_consolidados,
+                'modelo_utilizado': 'BAJIO_OCR',
+                'tiempo_procesamiento_segundos': round(time.time() - inicio, 2),
+                'errores': []
+            }
+        except Exception as e:
+            logger.error(f"❌ Error en flujo BAJÍO OCR: {e}")
+            return self._crear_respuesta_error(f"Error en flujo BAJÍO OCR: {e}")
 
     def _inferir_cargos_abonos_por_saldo(self, movimientos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Rellena cargos/abonos faltantes en base al cambio de saldo secuencial."""

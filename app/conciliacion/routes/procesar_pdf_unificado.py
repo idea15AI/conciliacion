@@ -111,28 +111,18 @@ async def procesar_pdf_unificado(
             else:
                 logger.warning("⚠️ No se pudieron obtener movimientos originales del procesamiento")
             
-            # Convertir a formato de respuesta y filtrar duplicados
+            # Convertir a formato de respuesta: si es BBVA, NO filtrar; otros bancos sí deduplican
             movimientos = []
-            movimientos_vistos = set()  # Para evitar duplicados
-            
-            logger.info(f"📊 Procesando {len(movimientos_originales)} movimientos originales")
-            
-            for i, mov in enumerate(movimientos_originales):
-                # Usar los valores originales de cargos y abonos del procesamiento
-                cargos = mov.get('cargos')
-                abonos = mov.get('abonos')
-                
-                # Crear clave única más simple para evitar duplicados
-                clave_unica = f"{mov.get('fecha')}_{mov.get('concepto')}_{cargos}_{abonos}"
-                
-                # Debug: mostrar algunos movimientos
-                if i < 5:  # Solo los primeros 5 para debug
-                    logger.info(f"🔄 Movimiento {i+1}: fecha={mov.get('fecha')}, concepto={mov.get('concepto')[:50]}, cargos={cargos}, abonos={abonos}")
-                
-                # Solo agregar si no es duplicado
-                if clave_unica not in movimientos_vistos:
-                    movimientos_vistos.add(clave_unica)
-                    
+            banco_detectado = (resultado.get('banco_detectado') or '').upper()
+            logger.info(f"🏦 Banco detectado para salida: {banco_detectado}")
+
+            if banco_detectado == 'BBVA':
+                logger.info("🟦 BBVA → sin filtrado ni deduplicación; manteniendo todos los movimientos")
+                for i, mov in enumerate(movimientos_originales):
+                    cargos = mov.get('cargos')
+                    abonos = mov.get('abonos')
+                    if i < 5:
+                        logger.info(f"🔄 BBVA Mov {i+1}: fecha={mov.get('fecha')}, concepto={mov.get('concepto')[:50]}, cargos={cargos}, abonos={abonos}")
                     movimientos.append({
                         'fecha': mov.get('fecha'),
                         'concepto': mov.get('concepto'),
@@ -143,10 +133,31 @@ async def procesar_pdf_unificado(
                         'tipo': 'CARGO' if cargos and cargos > 0 else 'ABONO' if abonos and abonos > 0 else 'N/A',
                         'estado': 'PENDIENTE'
                     })
-                else:
-                    logger.info(f"🔄 Duplicado encontrado: {clave_unica}")
-            
-            logger.info(f"📊 Movimientos después de filtrado: {len(movimientos)} de {len(movimientos_originales)}")
+                logger.info(f"📊 BBVA: enviados {len(movimientos)} de {len(movimientos_originales)} (sin filtrado)")
+            else:
+                movimientos_vistos = set()
+                logger.info(f"📊 Aplicando filtro anti-duplicados a {len(movimientos_originales)} movimientos")
+                for i, mov in enumerate(movimientos_originales):
+                    cargos = mov.get('cargos')
+                    abonos = mov.get('abonos')
+                    clave_unica = f"{mov.get('fecha')}_{mov.get('concepto')}_{cargos}_{abonos}"
+                    if i < 5:
+                        logger.info(f"🔄 Movimiento {i+1}: fecha={mov.get('fecha')}, concepto={mov.get('concepto')[:50]}, cargos={cargos}, abonos={abonos}")
+                    if clave_unica not in movimientos_vistos:
+                        movimientos_vistos.add(clave_unica)
+                        movimientos.append({
+                            'fecha': mov.get('fecha'),
+                            'concepto': mov.get('concepto'),
+                            'referencia': mov.get('referencia'),
+                            'cargos': cargos,
+                            'abonos': abonos,
+                            'saldo': mov.get('saldo'),
+                            'tipo': 'CARGO' if cargos and cargos > 0 else 'ABONO' if abonos and abonos > 0 else 'N/A',
+                            'estado': 'PENDIENTE'
+                        })
+                    else:
+                        logger.info(f"🔄 Duplicado encontrado: {clave_unica}")
+                logger.info(f"📊 Movimientos después de filtrado: {len(movimientos)} de {len(movimientos_originales)}")
             
             # Agregar movimientos al resultado
             resultado['movimientos'] = movimientos

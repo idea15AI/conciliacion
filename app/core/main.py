@@ -319,7 +319,12 @@ async def pdf_processor_interface():
 async def conciliacion_dashboard():
     """Sirve el dashboard de conciliación bancaria"""
     return FileResponse("frontend/conciliacion_dashboard.html")
-
+@app.get("/bbva-ocr")
+async def bbva_ocr_page():
+    """Página para OCR de BBVA"""
+    from pathlib import Path
+    html_path = Path("frontend/bbva_ocr_result.html")
+    return FileResponse(html_path)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

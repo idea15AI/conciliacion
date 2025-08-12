@@ -521,7 +521,8 @@ class ArchivoBancarioService:
             'HSBC': TipoBanco.HSBC,
             'SCOTIABANK': TipoBanco.SCOTIABANK,
             'AZTECA': TipoBanco.AZTECA,
-            'BANCO DEL BAJÍO': TipoBanco.OTRO,  # Agregar cuando se soporte
+            'BANCO DEL BAJÍO': TipoBanco.OTRO,  # alias descriptivo
+            'BAJIO': TipoBanco.OTRO,            # mapeo hasta agregar enum específico
         }
         
         return mapeo.get(banco_upper, TipoBanco.OTRO)

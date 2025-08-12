@@ -411,17 +411,19 @@
             // Extraer datos del resultado de procesamiento
             const resultado = data.resultado_procesamiento || {};
             const movimientos = resultado.movimientos || [];
+            const banco = (resultado.banco_detectado || '').toUpperCase();
             
-            // Debug: mostrar los primeros movimientos en la consola
+            // Debug
             console.log('📊 Datos recibidos:', data);
+            console.log('🏦 Banco detectado:', banco || 'No detectado');
             console.log('📊 Movimientos:', movimientos);
             if (movimientos.length > 0) {
                 console.log('📊 Primer movimiento:', movimientos[0]);
             }
 
-            // Show movements table
+            // Renderizar tabla (BBVA usa orden especial de columnas)
             if (movimientos && movimientos.length > 0) {
-                const table = createMovementsTable(movimientos);
+                const table = createMovementsTable(movimientos, banco);
                 movementsContainer.innerHTML = '';
                 movementsContainer.appendChild(table);
             } else {
@@ -429,7 +431,7 @@
             }
         }
 
-        function createMovementsTable(movements) {
+        function createMovementsTable(movements, banco) {
             const table = document.createElement('table');
             table.className = 'movements-table';
             
@@ -440,56 +442,81 @@
                 console.log('📊 Campos disponibles:', Object.keys(movements[0]));
             }
             
-            table.innerHTML = `
-                <thead>
+            const isBBVA = (banco === 'BBVA');
+            const theadHtml = isBBVA
+                ? `<thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Concepto</th>
+                            <th>Referencia</th>
+                            <th>Tipo</th>
+                            <th>Monto</th>
+                            <th>Saldo</th>
+                        </tr>
+                   </thead>`
+                : `<thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Referencia</th>
+                            <th>Concepto</th>
+                            <th>Tipo</th>
+                            <th>Monto</th>
+                            <th>Saldo</th>
+                        </tr>
+                   </thead>`;
+
+            const rowsHtml = movements.map((mov, index) => {
+                // Determinar tipo y monto basándose en cargos y abonos
+                let tipo = 'N/A';
+                let monto = 0;
+                
+                if (mov.cargos && mov.cargos > 0) {
+                    tipo = 'CARGO';
+                    monto = mov.cargos;
+                } else if (mov.abonos && mov.abonos > 0) {
+                    tipo = 'ABONO';
+                    monto = mov.abonos;
+                }
+                
+                // Debug por fila
+                console.log(`📊 Movimiento ${index + 1}:`, {
+                    fecha: mov.fecha,
+                    referencia: mov.referencia,
+                    concepto: mov.concepto,
+                    tipo: tipo,
+                    monto: monto,
+                    cargos: mov.cargos,
+                    abonos: mov.abonos,
+                    saldo: mov.saldo
+                });
+
+                if (isBBVA) {
+                    return `
+                        <tr>
+                            <td>${mov.fecha || 'N/A'}</td>
+                            <td>${mov.concepto || 'N/A'}</td>
+                            <td>${mov.referencia || 'N/A'}</td>
+                            <td class="${tipo === 'CARGO' ? 'cargo-amount' : tipo === 'ABONO' ? 'abono-amount' : ''}">${tipo}</td>
+                            <td class="${tipo === 'CARGO' ? 'cargo-amount' : tipo === 'ABONO' ? 'abono-amount' : ''}">${monto > 0 ? `$${monto.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : '-'}</td>
+                            <td>${mov.saldo ? `$${mov.saldo.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : 'N/A'}</td>
+                        </tr>
+                    `;
+                }
+                
+                // Orden general (no BBVA)
+                return `
                     <tr>
-                        <th>Fecha</th>
-                        <th>Referencia</th>
-                        <th>Concepto</th>
-                        <th>Tipo</th>
-                        <th>Monto</th>
-                        <th>Saldo</th>
+                        <td>${mov.fecha || 'N/A'}</td>
+                        <td>${mov.referencia || 'N/A'}</td>
+                        <td>${mov.concepto || 'N/A'}</td>
+                        <td class="${tipo === 'CARGO' ? 'cargo-amount' : tipo === 'ABONO' ? 'abono-amount' : ''}">${tipo}</td>
+                        <td class="${tipo === 'CARGO' ? 'cargo-amount' : tipo === 'ABONO' ? 'abono-amount' : ''}">${monto > 0 ? `$${monto.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : '-'}</td>
+                        <td>${mov.saldo ? `$${mov.saldo.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : 'N/A'}</td>
                     </tr>
-                </thead>
-                <tbody>
-                    ${movements.map((mov, index) => {
-                        // Determinar tipo y monto basándose en cargos y abonos
-                        let tipo = 'N/A';
-                        let monto = 0;
-                        
-                        if (mov.cargos && mov.cargos > 0) {
-                            tipo = 'CARGO';
-                            monto = mov.cargos;
-                        } else if (mov.abonos && mov.abonos > 0) {
-                            tipo = 'ABONO';
-                            monto = mov.abonos;
-                        }
-                        
-                        // Debug: mostrar cada movimiento
-                        console.log(`📊 Movimiento ${index + 1}:`, {
-                            fecha: mov.fecha,
-                            referencia: mov.referencia,
-                            concepto: mov.concepto,
-                            tipo: tipo,
-                            monto: monto,
-                            cargos: mov.cargos,
-                            abonos: mov.abonos,
-                            saldo: mov.saldo
-                        });
-                        
-                        return `
-                            <tr>
-                                <td>${mov.fecha || 'N/A'}</td>
-                                <td>${mov.referencia || 'N/A'}</td>
-                                <td>${mov.concepto || 'N/A'}</td>
-                                <td class="${tipo === 'CARGO' ? 'cargo-amount' : tipo === 'ABONO' ? 'abono-amount' : ''}">${tipo}</td>
-                                <td class="${tipo === 'CARGO' ? 'cargo-amount' : tipo === 'ABONO' ? 'abono-amount' : ''}">${monto > 0 ? `$${monto.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : '-'}</td>
-                                <td>${mov.saldo ? `$${mov.saldo.toLocaleString('es-MX', {minimumFractionDigits: 2})}` : 'N/A'}</td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            `;
+                `;
+            }).join('');
+
+            table.innerHTML = `${theadHtml}<tbody>${rowsHtml}</tbody>`;
             
             return table;
         }
