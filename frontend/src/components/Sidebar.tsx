@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   BanknotesIcon,
   DocumentTextIcon,
   ChartBarIcon,
+  DocumentArrowUpIcon,
 } from "@heroicons/react/24/outline";
 
 const navigation = [
@@ -28,6 +28,12 @@ const navigation = [
     href: "/conciliacion/docs",
     icon: DocumentTextIcon,
     description: "Guía de uso del sistema",
+  },
+  {
+    name: "Subir Estado de Cuenta",
+    href: "/subir-estado",
+    icon: DocumentArrowUpIcon,
+    description: "Subir estado de cuenta para conciliación",
   },
 ];
 

@@ -1,6 +1,6 @@
 """
-Conciliador Mejorado con FuzzyWuzzy
-Implementa el enfoque de 3 pasos: exacto, fuzzy, manual
+Conciliador Mejorado - Solo Conciliación Exacta
+Implementa el enfoque de 2 pasos: exacto y manual
 """
 
 import logging
@@ -11,8 +11,6 @@ from enum import Enum
 
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
-from fuzzywuzzy import fuzz
-from fuzzywuzzy import process
 
 from app.models.mysql_models import ComprobanteFiscal, DocumentoRelacionadoPago, ComplementoPago
 from app.conciliacion.models import MovimientoBancario, TipoMovimiento, EstadoConciliacion
@@ -21,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 class TipoConciliacion(Enum):
     EXACTA = "exacta"
-    FUZZY = "fuzzy"
     PENDIENTE = "pendiente"
     REVISION_DUPLICADOS = "revision_duplicados"
 
@@ -30,27 +27,22 @@ class ResultadoConciliacion:
     movimiento_id: int
     cfdi_id: Optional[int]
     tipo_conciliacion: TipoConciliacion
-    puntaje_fuzzy: Optional[float] = None
     razon: str = ""
     fecha_conciliacion: datetime = None
 
 class ConciliadorMejorado:
     """
-    Conciliador que implementa el enfoque de 3 pasos:
-    1. Filtro Estricto: Coincidencia Exacta
-    2. Filtro Flexible: Fuzzy Matching
-    3. Clasificación para Revisión Manual
+    Conciliador que implementa el enfoque de 2 pasos:
+    1. Filtro Estricto: Coincidencia Exacta (PUE y P)
+    2. Clasificación para Revisión Manual
     """
     
-    def __init__(self, db: Session, empresa_id: int, *, umbral_fuzzy: int = 90, incluir_ppd: bool = False, usar_solo_pue: bool = True, usar_fuzzy: bool = False):
+    def __init__(self, db: Session, empresa_id: int, *, incluir_ppd: bool = False, usar_solo_pue: bool = True):
         self.db = db
         self.empresa_id = empresa_id
-        # Modo más estricto por defecto: umbral alto y sólo PUE
-        self.umbral_fuzzy = umbral_fuzzy
         self.ventana_dias = 7   # Búsqueda ±7 días
         self.incluir_ppd = incluir_ppd
         self.usar_solo_pue = usar_solo_pue
-        self.usar_fuzzy = usar_fuzzy
         # Evita asignar el mismo CFDI a múltiples movimientos
         self.cfdi_usados: Set[int] = set()
         # Para detectar movimientos duplicados
@@ -58,34 +50,20 @@ class ConciliadorMejorado:
         
     def conciliar_movimientos(self, movimientos: List[MovimientoBancario]) -> List[ResultadoConciliacion]:
         """
-        Proceso principal de conciliación con 3 pasos
+        Proceso principal de conciliación con 2 pasos
         """
         resultados = []
         
         for movimiento in movimientos:
             logger.info(f"🔍 Conciliando movimiento {movimiento.id}: {movimiento.concepto}")
             
-            # Paso 1: Búsqueda Exacta
+            # Paso 1: Búsqueda Exacta (PUE y P, excluyendo PPD)
             resultado_exacto = self._buscar_coincidencia_exacta(movimiento)
             if resultado_exacto:
                 resultados.append(resultado_exacto)
                 continue
                 
-            # Paso 2 (opcional): Complementos de pago (PPD)
-            if self.incluir_ppd:
-                resultado_pago = self._buscar_complementos_pago(movimiento)
-                if resultado_pago:
-                    resultados.append(resultado_pago)
-                    continue
-
-            # Paso 3: Búsqueda Fuzzy (desactivado por defecto)
-            if self.usar_fuzzy:
-                resultado_fuzzy = self._buscar_coincidencia_fuzzy(movimiento)
-                if resultado_fuzzy:
-                    resultados.append(resultado_fuzzy)
-                    continue
-                
-            # Paso 4: Marcar como Pendiente
+            # Paso 2: Marcar como Pendiente
             resultado_pendiente = ResultadoConciliacion(
                 movimiento_id=movimiento.id,
                 cfdi_id=None,
@@ -95,10 +73,10 @@ class ConciliadorMejorado:
             )
             resultados.append(resultado_pendiente)
         
-        # Paso 5: Detectar y marcar movimientos duplicados para revisión
+        # Paso 3: Detectar y marcar movimientos duplicados para revisión
         self._detectar_movimientos_duplicados(resultados)
 
-        # Paso 6: Marcar como revisión si existen múltiples CFDI del mismo monto en el mismo día
+        # Paso 4: Marcar como revisión si existen múltiples CFDI del mismo monto en el mismo día
         self._marcar_cfdi_no_unico_por_dia(resultados)
         
         return resultados
@@ -124,22 +102,46 @@ class ConciliadorMejorado:
                 ComprobanteFiscal.estatus_sat == True
             )
         ).all()
-        cfdis_validos = [c for c in self._filtrar_cfdis_validos(candidatos) if c.tipo_comprobante == 'I']
+        cfdis_validos = [c for c in self._filtrar_cfdis_validos(candidatos) if c.tipo_comprobante in ['I', 'P']]
         cfdis_validos = [c for c in cfdis_validos if c.id not in self.cfdi_usados]
 
         # Filtrar por monto exacto (tolerancia 1 centavo)
-        cfdis_monto = [c for c in cfdis_validos if abs(float(c.total) - float(movimiento.monto)) < 0.01]
+        # Para tipo P usar monto_pago de complementos_pago, para tipo I usar total
+        cfdis_monto = []
+        for c in cfdis_validos:
+            if c.tipo_comprobante == 'P':
+                # Obtener monto de complemento de pago
+                complemento = self.db.query(ComplementoPago).filter(
+                    ComplementoPago.cfdi_id == c.id
+                ).first()
+                if complemento and complemento.monto_pago:
+                    if abs(float(complemento.monto_pago) - float(movimiento.monto)) < 0.01:
+                        cfdis_monto.append(c)
+            else:  # tipo I
+                if abs(float(c.total) - float(movimiento.monto)) < 0.01:
+                    cfdis_monto.append(c)
 
         if cfdis_monto:
             elegido = self._seleccionar_cfdi_mas_cercano_por_fecha(movimiento.fecha, cfdis_monto)
             if elegido:
                 self.cfdi_usados.add(elegido.id)
                 receptor = f"; Receptor: {elegido.nombre_receptor}" if getattr(elegido, 'nombre_receptor', None) else ""
+                tipo_cfdi = f"({elegido.tipo_comprobante}-{elegido.metodo_pago})"
+                
+                # Mostrar el monto correcto según el tipo
+                monto_mostrar = elegido.total
+                if elegido.tipo_comprobante == 'P':
+                    complemento = self.db.query(ComplementoPago).filter(
+                        ComplementoPago.cfdi_id == elegido.id
+                    ).first()
+                    if complemento and complemento.monto_pago:
+                        monto_mostrar = complemento.monto_pago
+                
                 return ResultadoConciliacion(
                     movimiento_id=movimiento.id,
                     cfdi_id=elegido.id,
                     tipo_conciliacion=TipoConciliacion.EXACTA,
-                    razon=f"Exacta PUE en mismo día: CFDI {elegido.uuid} - Monto: ${elegido.total}{receptor}",
+                    razon=f"Exacta {tipo_cfdi} en mismo día: CFDI {elegido.uuid} - Monto: ${monto_mostrar}{receptor}",
                     fecha_conciliacion=datetime.now()
                 )
 
@@ -158,19 +160,45 @@ class ConciliadorMejorado:
                 ComprobanteFiscal.estatus_sat == True
             )
         ).all()
-        cfdis_validos2 = [c for c in self._filtrar_cfdis_validos(candidatos2) if c.tipo_comprobante == 'I']
+        cfdis_validos2 = [c for c in self._filtrar_cfdis_validos(candidatos2) if c.tipo_comprobante in ['I', 'P']]
         cfdis_validos2 = [c for c in cfdis_validos2 if c.id not in self.cfdi_usados]
-        cfdis_monto2 = [c for c in cfdis_validos2 if abs(float(c.total) - float(movimiento.monto)) < 0.01]
+        
+        # Filtrar por monto exacto (tolerancia 1 centavo)
+        # Para tipo P usar monto_pago de complementos_pago, para tipo I usar total
+        cfdis_monto2 = []
+        for c in cfdis_validos2:
+            if c.tipo_comprobante == 'P':
+                # Obtener monto de complemento de pago
+                complemento = self.db.query(ComplementoPago).filter(
+                    ComplementoPago.cfdi_id == c.id
+                ).first()
+                if complemento and complemento.monto_pago:
+                    if abs(float(complemento.monto_pago) - float(movimiento.monto)) < 0.01:
+                        cfdis_monto2.append(c)
+            else:  # tipo I
+                if abs(float(c.total) - float(movimiento.monto)) < 0.01:
+                    cfdis_monto2.append(c)
         if cfdis_monto2:
             elegido = self._seleccionar_cfdi_mas_cercano_por_fecha(movimiento.fecha, cfdis_monto2)
             if elegido:
                 self.cfdi_usados.add(elegido.id)
                 receptor = f"; Receptor: {elegido.nombre_receptor}" if getattr(elegido, 'nombre_receptor', None) else ""
+                tipo_cfdi = f"({elegido.tipo_comprobante}-{elegido.metodo_pago})"
+                
+                # Mostrar el monto correcto según el tipo
+                monto_mostrar = elegido.total
+                if elegido.tipo_comprobante == 'P':
+                    complemento = self.db.query(ComplementoPago).filter(
+                        ComplementoPago.cfdi_id == elegido.id
+                    ).first()
+                    if complemento and complemento.monto_pago:
+                        monto_mostrar = complemento.monto_pago
+                
                 return ResultadoConciliacion(
                     movimiento_id=movimiento.id,
                     cfdi_id=elegido.id,
                     tipo_conciliacion=TipoConciliacion.EXACTA,
-                    razon=f"Exacta PUE ±1 día: CFDI {elegido.uuid} - Monto: ${elegido.total}{receptor}",
+                    razon=f"Exacta {tipo_cfdi} ±1 día: CFDI {elegido.uuid} - Monto: ${monto_mostrar}{receptor}",
                     fecha_conciliacion=datetime.now()
                 )
         
@@ -179,142 +207,24 @@ class ConciliadorMejorado:
     def _filtrar_cfdis_validos(self, cfdis: List[ComprobanteFiscal]) -> List[ComprobanteFiscal]:
         """
         Filtra CFDIs válidos para conciliación:
-        - Ignora CFDIs de PPD (pago en parcialidades o diferido)
-        - Solo CFDIs tipo 'I' (Ingreso) con método de pago 'PUE'
-        - O CFDIs tipo 'P' (Pago) electrónicos
+        - Permite CFDIs tipo 'I' (Ingreso) con método de pago 'PUE'
+        - Permite CFDIs tipo 'P' (Pago) 
+        - Excluye CFDIs con método de pago 'PPD'
         """
         cfdis_validos = []
         
         for cfdi in cfdis:
-            # Método de pago
-            if self.usar_solo_pue and cfdi.metodo_pago != 'PUE':
-                continue
-            if not self.usar_solo_pue and cfdi.metodo_pago == 'PPD':
-                # si aceptamos todo excepto PPD
+            # Excluir PPD (pago en parcialidades o diferido)
+            if cfdi.metodo_pago == 'PPD':
                 continue
 
-            # Tipos de comprobante válidos para conciliación directa: Ingreso (I)
+            # Tipos de comprobante válidos para conciliación directa: Ingreso (I) y Pago (P)
             if cfdi.tipo_comprobante == 'I':
                 cfdis_validos.append(cfdi)
-            # Complementos de pago (P) solo si está habilitado
-            elif cfdi.tipo_comprobante == 'P' and self.incluir_ppd:
+            elif cfdi.tipo_comprobante == 'P':
                 cfdis_validos.append(cfdi)
         
         return cfdis_validos
-    
-    def _buscar_coincidencia_fuzzy(self, movimiento: MovimientoBancario) -> Optional[ResultadoConciliacion]:
-        """
-        Paso 2: Filtro Flexible - Fuzzy Matching
-        Usa FuzzyWuzzy para encontrar coincidencias probables
-        """
-        # Asegurar que ambas fechas sean del mismo tipo
-        if hasattr(movimiento.fecha, 'date'):  # Es datetime
-            fecha_inicio = movimiento.fecha - timedelta(days=self.ventana_dias)
-            fecha_fin = movimiento.fecha + timedelta(days=self.ventana_dias)
-        else:  # Es date
-            fecha_inicio = datetime.combine(movimiento.fecha - timedelta(days=self.ventana_dias), datetime.min.time())
-            fecha_fin = datetime.combine(movimiento.fecha + timedelta(days=self.ventana_dias), datetime.min.time())
-        
-        # Obtener CFDIs del período (filtrados ya por PUE si aplica)
-        cfdis = self.db.query(ComprobanteFiscal).filter(
-            and_(
-                ComprobanteFiscal.empresa_id == self.empresa_id,
-                ComprobanteFiscal.fecha.between(fecha_inicio, fecha_fin),
-                ComprobanteFiscal.estatus_sat == True
-            )
-        ).all()
-        
-        # Filtrar CFDIs válidos
-        cfdis_validos = [c for c in self._filtrar_cfdis_validos(cfdis) if c.id not in self.cfdi_usados]
-        
-        if not cfdis_validos:
-            return None
-        
-        # Preparar textos para comparación
-        texto_movimiento = self._normalizar_texto(movimiento.concepto)
-        mejores_coincidencias = []
-        
-        for cfdi in cfdis_validos:
-            # Comparar con diferentes campos del CFDI
-            textos_cfdi = [
-                cfdi.serie_cfdi or "",
-                cfdi.folio_cfdi or "",
-                cfdi.nombre_emisor or "",
-                cfdi.nombre_receptor or "",
-                cfdi.uuid or ""
-            ]
-            
-            for texto_cfdi in textos_cfdi:
-                if not texto_cfdi:
-                    continue
-                    
-                texto_cfdi_norm = self._normalizar_texto(texto_cfdi)
-                
-                # Usar partial_ratio para subcadenas (mejor para referencias)
-                puntaje = fuzz.partial_ratio(texto_movimiento, texto_cfdi_norm)
-                
-                if puntaje >= self.umbral_fuzzy:
-                    mejores_coincidencias.append({
-                        'cfdi': cfdi,
-                        'puntaje': puntaje,
-                        'texto_comparado': texto_cfdi_norm
-                    })
-        
-        # Tomar la mejor coincidencia
-        if mejores_coincidencias:
-            # Si hay empate por puntaje, elegir por proximidad de fecha
-            def calcular_distancia_fecha(cfdi):
-                cfdi_fecha = getattr(cfdi['cfdi'], 'fecha_timbrado', None) or getattr(cfdi['cfdi'], 'fecha', None) or fecha_inicio
-                # Normalizar ambas fechas a datetime para la comparación
-                if hasattr(cfdi_fecha, 'date'):  # Es datetime
-                    cfdi_dt = cfdi_fecha
-                else:  # Es date
-                    cfdi_dt = datetime.combine(cfdi_fecha, datetime.min.time())
-                
-                if hasattr(movimiento.fecha, 'date'):  # Es datetime
-                    mov_dt = movimiento.fecha
-                else:  # Es date
-                    mov_dt = datetime.combine(movimiento.fecha, datetime.min.time())
-                
-                return abs(cfdi_dt - mov_dt)
-            
-            mejores_coincidencias.sort(key=lambda x: (
-                -x['puntaje'],
-                calcular_distancia_fecha(x)
-            ))
-            mejor = mejores_coincidencias[0]
-            self.cfdi_usados.add(mejor['cfdi'].id)
-            
-            return ResultadoConciliacion(
-                movimiento_id=movimiento.id,
-                cfdi_id=mejor['cfdi'].id,
-                tipo_conciliacion=TipoConciliacion.FUZZY,
-                puntaje_fuzzy=mejor['puntaje'],
-                razon=f"Fuzzy PUE: {mejor['puntaje']}% CFDI {mejor['cfdi'].uuid} - Texto: {mejor['texto_comparado']}" + (f"; Receptor: {mejor['cfdi'].nombre_receptor}" if getattr(mejor['cfdi'], 'nombre_receptor', None) else ""),
-                fecha_conciliacion=datetime.now()
-            )
-        
-        return None
-    
-    def _normalizar_texto(self, texto: str) -> str:
-        """
-        Normaliza texto para mejor comparación fuzzy
-        """
-        if not texto:
-            return ""
-        
-        # Convertir a minúsculas
-        texto = texto.lower()
-        
-        # Remover caracteres especiales comunes
-        caracteres_especiales = ['-', '_', '.', ',', '(', ')', '[', ']']
-        for char in caracteres_especiales:
-            texto = texto.replace(char, ' ')
-        
-        # Remover espacios múltiples
-        texto = ' '.join(texto.split())
-        
-        return texto
     
     def _buscar_complementos_pago(self, movimiento: MovimientoBancario) -> Optional[ResultadoConciliacion]:
         """
@@ -355,7 +265,6 @@ class ConciliadorMejorado:
         """
         total_movimientos = len(resultados)
         exactos = len([r for r in resultados if r.tipo_conciliacion == TipoConciliacion.EXACTA])
-        fuzzy = len([r for r in resultados if r.tipo_conciliacion == TipoConciliacion.FUZZY])
         pendientes = len([r for r in resultados if r.tipo_conciliacion == TipoConciliacion.PENDIENTE])
         duplicados = len([r for r in resultados if r.tipo_conciliacion == TipoConciliacion.REVISION_DUPLICADOS])
         
@@ -383,7 +292,6 @@ class ConciliadorMejorado:
                 'movimiento_id': r.movimiento_id,
                 'cfdi_id': r.cfdi_id,
                 'tipo': r.tipo_conciliacion.value,
-                'puntaje_fuzzy': r.puntaje_fuzzy,
                 'razon': r.razon,
                 'fecha': movimiento.fecha.isoformat() if movimiento and hasattr(movimiento.fecha, 'isoformat') else str(movimiento.fecha) if movimiento else None,
                 'concepto': movimiento.concepto if movimiento else None,
@@ -399,10 +307,9 @@ class ConciliadorMejorado:
             'resumen': {
                 'total_movimientos': total_movimientos,
                 'conciliados_exactos': exactos,
-                'conciliados_fuzzy': fuzzy,
                 'pendientes_revision': pendientes,
                 'duplicados_revision': duplicados,
-                'porcentaje_automatizado': ((exactos + fuzzy) / total_movimientos * 100) if total_movimientos > 0 else 0
+                'porcentaje_automatizado': ((exactos) / total_movimientos * 100) if total_movimientos > 0 else 0
             },
             'detalles': detalles
         } 
@@ -473,13 +380,14 @@ class ConciliadorMejorado:
 
     def _marcar_cfdi_no_unico_por_dia(self, resultados: List[ResultadoConciliacion]) -> None:
         """
-        Marca como revisión los resultados que usan un CFDI cuyo monto NO es único en ese día.
-        La validación se hace por (fecha_del_cfdi, monto_redondeado_a_centavos).
+        Marca como revisión los resultados cuando NO hay unicidad entre movimientos y CFDIs.
+        La lógica es: 1 movimiento + 1 CFDI del mismo monto en la misma fecha = EXACTA
+        Múltiples movimientos o múltiples CFDIs del mismo monto en la misma fecha = REVISIÓN
         """
         if not resultados:
             return
 
-        # Recolectar rango de fechas de movimientos para acotar consulta de CFDIs
+        # Recolectar rango de fechas de movimientos para acotar consulta
         dias_movimientos = []
         for r in resultados:
             mov = self.db.query(MovimientoBancario).filter(MovimientoBancario.id == r.movimiento_id).first()
@@ -503,44 +411,109 @@ class ConciliadorMejorado:
                 ComprobanteFiscal.fecha.between(inicio, fin)
             )
         )
-        # Restringir a PUE/Ingreso si corresponde
-        if self.usar_solo_pue:
-            cfdi_query = cfdi_query.filter(ComprobanteFiscal.tipo_comprobante == 'I', ComprobanteFiscal.metodo_pago == 'PUE')
-        else:
-            cfdi_query = cfdi_query.filter(ComprobanteFiscal.tipo_comprobante == 'I')
-
+        cfdi_query = cfdi_query.filter(
+            and_(
+                ComprobanteFiscal.tipo_comprobante.in_(['I', 'P']),
+                or_(
+                    ComprobanteFiscal.metodo_pago != 'PPD',
+                    ComprobanteFiscal.metodo_pago.is_(None)
+                )
+            )
+        )
         cfdis_rango = cfdi_query.all()
 
-        # Conteo por (día, monto)
-        conteo_por_dia_monto = {}
+        # Obtener movimientos del rango
+        movimientos_query = self.db.query(MovimientoBancario).filter(
+            and_(
+                MovimientoBancario.empresa_id == self.empresa_id,
+                MovimientoBancario.fecha.between(inicio, fin)
+            )
+        )
+        movimientos_rango = movimientos_query.all()
+
+        # Conteo de CFDIs por (día, monto)
+        conteo_cfdis_por_dia_monto = {}
         for c in cfdis_rango:
             f = getattr(c, 'fecha', None) or getattr(c, 'fecha_timbrado', None)
             if not f:
                 continue
             dia_c = f.date() if hasattr(f, 'date') else f
-            monto_c = round(float(c.total), 2) if getattr(c, 'total', None) is not None else None
-            if monto_c is None:
-                continue
+            
+            # Para tipo P usar monto_pago, para tipo I usar total
+            if c.tipo_comprobante == 'P':
+                complemento = self.db.query(ComplementoPago).filter(
+                    ComplementoPago.cfdi_id == c.id
+                ).first()
+                if complemento and complemento.monto_pago:
+                    monto_c = round(float(complemento.monto_pago), 2)
+                else:
+                    continue
+            else:
+                monto_c = round(float(c.total), 2) if getattr(c, 'total', None) is not None else None
+                if monto_c is None:
+                    continue
+            
             clave = (dia_c, monto_c)
-            conteo_por_dia_monto[clave] = conteo_por_dia_monto.get(clave, 0) + 1
+            conteo_cfdis_por_dia_monto[clave] = conteo_cfdis_por_dia_monto.get(clave, 0) + 1
 
-        if not conteo_por_dia_monto:
-            return
+        # Conteo de movimientos por (día, monto)
+        conteo_movs_por_dia_monto = {}
+        for m in movimientos_rango:
+            if not m.fecha or not m.monto:
+                continue
+            dia_m = m.fecha.date() if hasattr(m.fecha, 'date') else m.fecha
+            monto_m = round(float(m.monto), 2)
+            clave = (dia_m, monto_m)
+            conteo_movs_por_dia_monto[clave] = conteo_movs_por_dia_monto.get(clave, 0) + 1
 
-        # Marcar resultados cuya pareja (día, monto) no sea única
+        # Marcar resultados según la lógica de unicidad
         for r in resultados:
             if r.tipo_conciliacion != TipoConciliacion.EXACTA or not r.cfdi_id:
                 continue
+            
+            # Obtener datos del movimiento y CFDI
+            mov = self.db.query(MovimientoBancario).filter(MovimientoBancario.id == r.movimiento_id).first()
             cfdi = self.db.query(ComprobanteFiscal).filter(ComprobanteFiscal.id == r.cfdi_id).first()
-            if not cfdi:
+            if not mov or not cfdi:
                 continue
-            f = getattr(cfdi, 'fecha', None) or getattr(cfdi, 'fecha_timbrado', None)
-            if not f:
+            
+            # Obtener fecha y monto del movimiento
+            dia_mov = mov.fecha.date() if hasattr(mov.fecha, 'date') else mov.fecha
+            monto_mov = round(float(mov.monto), 2)
+            
+            # Obtener fecha y monto del CFDI
+            f_cfdi = getattr(cfdi, 'fecha', None) or getattr(cfdi, 'fecha_timbrado', None)
+            if not f_cfdi:
                 continue
-            dia_c = f.date() if hasattr(f, 'date') else f
-            monto_c = round(float(cfdi.total), 2) if getattr(cfdi, 'total', None) is not None else None
-            if monto_c is None:
-                continue
-            if conteo_por_dia_monto.get((dia_c, monto_c), 0) > 1:
+            dia_cfdi = f_cfdi.date() if hasattr(f_cfdi, 'date') else f_cfdi
+            
+            # Para tipo P usar monto_pago, para tipo I usar total
+            if cfdi.tipo_comprobante == 'P':
+                complemento = self.db.query(ComplementoPago).filter(
+                    ComplementoPago.cfdi_id == cfdi.id
+                ).first()
+                if complemento and complemento.monto_pago:
+                    monto_cfdi = round(float(complemento.monto_pago), 2)
+                else:
+                    continue
+            else:
+                monto_cfdi = round(float(cfdi.total), 2) if getattr(cfdi, 'total', None) is not None else None
+                if monto_cfdi is None:
+                    continue
+            
+            # Verificar unicidad
+            clave_mov = (dia_mov, monto_mov)
+            clave_cfdi = (dia_cfdi, monto_cfdi)
+            
+            count_movs = conteo_movs_por_dia_monto.get(clave_mov, 0)
+            count_cfdis = conteo_cfdis_por_dia_monto.get(clave_cfdi, 0)
+            
+            # Si hay múltiples movimientos o múltiples CFDIs del mismo monto en la misma fecha, marcar como revisión
+            if count_movs > 1 or count_cfdis > 1:
                 r.tipo_conciliacion = TipoConciliacion.REVISION_DUPLICADOS
-                r.razon = f"REVISIÓN REQUERIDA: múltiples CFDIs con monto ${monto_c} en fecha {dia_c}. Validación estricta requiere monto único en el día."
+                if count_movs > 1 and count_cfdis > 1:
+                    r.razon = f"REVISIÓN REQUERIDA: {count_movs} movimientos y {count_cfdis} CFDIs con monto ${monto_mov} en fecha {dia_mov}. Validación requiere unicidad."
+                elif count_movs > 1:
+                    r.razon = f"REVISIÓN REQUERIDA: {count_movs} movimientos con monto ${monto_mov} en fecha {dia_mov}. Validación requiere unicidad."
+                else:
+                    r.razon = f"REVISIÓN REQUERIDA: {count_cfdis} CFDIs con monto ${monto_cfdi} en fecha {dia_cfdi}. Validación requiere unicidad."

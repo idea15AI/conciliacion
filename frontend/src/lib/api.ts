@@ -1157,6 +1157,20 @@ export const conciliacionAPI = {
     return response.data;
   },
 
+  // Subir estado de cuenta por empresa_id (usa router unificado)
+  subirEstadoCuentaEmpresa: async (empresaId: number, file: File): Promise<ResultadoOCR> => {
+    console.log('📄 Subiendo estado de cuenta para empresa_id:', empresaId);
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post(`/api/v1/procesar-pdf/subir?empresa_id=${empresaId}`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    console.log('✅ Estado de cuenta procesado (empresa_id):', response.data);
+    return response.data;
+  },
+
   ejecutarConciliacion: async (request: ConciliacionRequest): Promise<ResumenConciliacion> => {
     console.log('🔄 Ejecutando conciliación:', request);
     const response = await api.post('/api/v1/conciliacion/ejecutar', request);

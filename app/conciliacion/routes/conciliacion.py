@@ -1,5 +1,5 @@
 """
-Router para Conciliación Mejorada con FuzzyWuzzy
+Router para Conciliación Exacta con CFDIs PUE y P
 """
 
 import logging
@@ -8,16 +8,30 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 
 from app.core.database import get_db
 from app.conciliacion.models import MovimientoBancario, EstadoConciliacion
 from app.conciliacion.conciliador import ConciliadorMejorado, TipoConciliacion
-from app.models.mysql_models import ComprobanteFiscal, EmpresaContribuyente
+from app.models.mysql_models import ComprobanteFiscal, EmpresaContribuyente, ComplementoPago
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conciliacion", tags=["Conciliación"])
+@router.get("/empresas")
+async def listar_empresas(db: Session = Depends(get_db)):
+    """
+    Devuelve la lista de empresas contribuyentes disponibles para seleccionar en el frontend.
+    """
+    empresas = db.query(EmpresaContribuyente).order_by(EmpresaContribuyente.razon_social.asc()).all()
+    return [
+        {
+            "id": e.id,
+            "rfc": e.rfc,
+            "razon_social": e.razon_social,
+        }
+        for e in empresas
+    ]
 
 @router.post("/ejecutar/{empresa_id}")
 async def ejecutar_conciliacion_mejorada(
@@ -26,17 +40,17 @@ async def ejecutar_conciliacion_mejorada(
     fecha_fin: str = None,
     solo_pue: bool = True,
     incluir_ppd: bool = False,
-    umbral_fuzzy: int = 90,
     db: Session = Depends(get_db)
 ):
     """
-    Ejecuta conciliación mejorada con FuzzyWuzzy
+    Ejecuta conciliación exacta con CFDIs PUE y P
     
     Parámetros:
     - empresa_id: ID de la empresa
     - fecha_inicio: Fecha inicio (YYYY-MM-DD) - opcional
     - fecha_fin: Fecha fin (YYYY-MM-DD) - opcional  
-    - umbral_fuzzy: Umbral para coincidencias fuzzy (0-100)
+    - solo_pue: Filtro para solo PUE (incluye P siempre)
+    - incluir_ppd: Incluir complementos de pago PPD
     """
     try:
         # Validar empresa por catálogo principal, no por existencia de CFDI
@@ -76,10 +90,8 @@ async def ejecutar_conciliacion_mejorada(
         conciliador = ConciliadorMejorado(
             db,
             empresa_id,
-            umbral_fuzzy=umbral_fuzzy,
             incluir_ppd=incluir_ppd,
-            usar_solo_pue=solo_pue,
-            usar_fuzzy=False
+            usar_solo_pue=solo_pue
         )
         
         # Ejecutar conciliación
@@ -95,7 +107,7 @@ async def ejecutar_conciliacion_mejorada(
             ).first()
             
             if movimiento:
-                if resultado.tipo_conciliacion in [TipoConciliacion.EXACTA, TipoConciliacion.FUZZY]:
+                if resultado.tipo_conciliacion == TipoConciliacion.EXACTA:
                     # Mapear resultado a cfdi_uuid y actualizar estado/fecha
                     cfdi = db.query(ComprobanteFiscal).filter(ComprobanteFiscal.id == resultado.cfdi_id).first() if resultado.cfdi_id else None
                     if cfdi and cfdi.uuid:
@@ -107,13 +119,12 @@ async def ejecutar_conciliacion_mejorada(
         
         db.commit()
         
-        logger.info(f"✅ Conciliación completada: {reporte['resumen']['conciliados_exactos']} exactos, {reporte['resumen']['conciliados_fuzzy']} fuzzy")
+        logger.info(f"✅ Conciliación completada: {reporte['resumen']['conciliados_exactos']} exactos, {reporte['resumen']['pendientes_revision']} pendientes")
         
         return {
             "mensaje": "Conciliación ejecutada exitosamente",
             "empresa_id": empresa_id,
             "fecha_ejecucion": datetime.now().isoformat(),
-            "umbral_fuzzy": umbral_fuzzy,
             "solo_pue": solo_pue,
             "incluir_ppd": incluir_ppd,
             **reporte
@@ -260,13 +271,12 @@ async def obtener_detalles_conciliacion(
                 'movimiento_id': movimiento.id,
                 'cfdi_id': cfdi_id,
                 'tipo': movimiento.estado.value if movimiento.estado else 'pendiente',
-                'puntaje_fuzzy': None,  # No disponible en este endpoint
                 'razon': f"Estado: {movimiento.estado.value if movimiento.estado else 'PENDIENTE'}",
                 'fecha': movimiento.fecha.isoformat() if movimiento.fecha else None,
                 'concepto': movimiento.concepto if movimiento.concepto else None,
                 'monto': float(movimiento.monto) if movimiento.monto else 0,
                 'cfdi_monto': float(cfdi_monto) if cfdi_monto else None,
-                'cfdi_total': float(cfdi_total) if cfdi_total else None
+                'cfdi_total': float(cfdi_total) if cfdi_monto else None
             }
             detalles.append(detalle)
         
@@ -309,17 +319,35 @@ async def obtener_montos_por_rango(
             q_mov = q_mov.filter(MovimientoBancario.fecha <= fecha_fin_dt)
         movimientos = q_mov.all()
 
-        # CFDIs
+        # CFDIs - Siempre permitir tanto PUE como P, excluyendo PPD (permitir NULL en metodo para tipo P)
         q_cfdi = db.query(ComprobanteFiscal).filter(
             ComprobanteFiscal.empresa_id == empresa_id,
             ComprobanteFiscal.estatus_sat == True
         )
         if fecha_inicio_dt:
-            q_cfdi = q_cfdi.filter(ComprobanteFiscal.fecha >= fecha_inicio_dt)
+            q_cfdi = q_cfdi.filter(
+                or_(
+                    ComprobanteFiscal.fecha >= fecha_inicio_dt,
+                    ComprobanteFiscal.fecha_timbrado >= fecha_inicio_dt
+                )
+            )
         if fecha_fin_dt:
-            q_cfdi = q_cfdi.filter(ComprobanteFiscal.fecha <= fecha_fin_dt)
-        if solo_pue:
-            q_cfdi = q_cfdi.filter(ComprobanteFiscal.tipo_comprobante == 'I', ComprobanteFiscal.metodo_pago == 'PUE')
+            q_cfdi = q_cfdi.filter(
+                or_(
+                    ComprobanteFiscal.fecha <= fecha_fin_dt,
+                    ComprobanteFiscal.fecha_timbrado <= fecha_fin_dt
+                )
+            )
+        # Permitir tanto PUE como P, excluyendo PPD (pero aceptar NULL en metodo_pago)
+        q_cfdi = q_cfdi.filter(
+            and_(
+                ComprobanteFiscal.tipo_comprobante.in_(['I', 'P']),
+                or_(
+                    ComprobanteFiscal.metodo_pago != 'PPD',
+                    ComprobanteFiscal.metodo_pago.is_(None)
+                )
+            )
+        )
         cfdis = q_cfdi.all()
 
         # Agregar por monto (redondeo a 2 decimales)
@@ -338,10 +366,19 @@ async def obtener_montos_por_rango(
 
         cfdi_by_amount: Dict[float, int] = {}
         for c in cfdis:
-            k = to_amount_key(c.total)
-            if k is None:
-                continue
-            cfdi_by_amount[k] = cfdi_by_amount.get(k, 0) + 1
+            # Para tipo P usar monto_pago de complementos_pago, para tipo I usar total
+            if c.tipo_comprobante == 'P':
+                complemento = db.query(ComplementoPago).filter(
+                    ComplementoPago.cfdi_id == c.id
+                ).first()
+                if complemento and complemento.monto_pago:
+                    k = to_amount_key(complemento.monto_pago)
+                    if k is not None:
+                        cfdi_by_amount[k] = cfdi_by_amount.get(k, 0) + 1
+            else:  # tipo I
+                k = to_amount_key(c.total)
+                if k is not None:
+                    cfdi_by_amount[k] = cfdi_by_amount.get(k, 0) + 1
 
         # Agrupar montos cercanos (<= 0.01) y mostrarlos como el mínimo del grupo
         all_amounts_sorted = sorted(set(list(mov_by_amount.keys()) + list(cfdi_by_amount.keys())))
@@ -416,35 +453,68 @@ async def obtener_detalle_monto(
             if (m.monto is not None and abs(float(m.monto) - float(monto)) <= tol)
         ]
 
-        # CFDIs
+        # CFDIs - Siempre permitir tanto PUE como P, excluyendo PPD
         q_cfdi = db.query(ComprobanteFiscal).filter(
             ComprobanteFiscal.empresa_id == empresa_id,
             ComprobanteFiscal.estatus_sat == True
         )
         if fecha_inicio_dt:
-            q_cfdi = q_cfdi.filter(ComprobanteFiscal.fecha >= fecha_inicio_dt)
+            q_cfdi = q_cfdi.filter(
+                or_(
+                    ComprobanteFiscal.fecha >= fecha_inicio_dt,
+                    ComprobanteFiscal.fecha_timbrado >= fecha_inicio_dt
+                )
+            )
         if fecha_fin_dt:
-            q_cfdi = q_cfdi.filter(ComprobanteFiscal.fecha <= fecha_fin_dt)
-        if solo_pue:
-            q_cfdi = q_cfdi.filter(ComprobanteFiscal.tipo_comprobante == 'I', ComprobanteFiscal.metodo_pago == 'PUE')
+            q_cfdi = q_cfdi.filter(
+                or_(
+                    ComprobanteFiscal.fecha <= fecha_fin_dt,
+                    ComprobanteFiscal.fecha_timbrado <= fecha_fin_dt
+                )
+            )
+        # Permitir tanto PUE como P, excluyendo PPD
+        q_cfdi = q_cfdi.filter(
+            and_(
+                ComprobanteFiscal.tipo_comprobante.in_(['I', 'P']),
+                or_(
+                    ComprobanteFiscal.metodo_pago != 'PPD',
+                    ComprobanteFiscal.metodo_pago.is_(None)
+                )
+            )
+        )
         cfdis_all = q_cfdi.all()
-        cfdis = [
-            c for c in cfdis_all
-            if (c.total is not None and abs(float(c.total) - float(monto)) <= tol)
-        ]
+        cfdis = []
+        for c in cfdis_all:
+            # Para tipo P usar monto_pago de complementos_pago, para tipo I usar total
+            if c.tipo_comprobante == 'P':
+                complemento = db.query(ComplementoPago).filter(
+                    ComplementoPago.cfdi_id == c.id
+                ).first()
+                if complemento and complemento.monto_pago:
+                    if abs(float(complemento.monto_pago) - float(monto)) <= tol:
+                        cfdis.append(c)
+            else:  # tipo I
+                if c.total is not None and abs(float(c.total) - float(monto)) <= tol:
+                    cfdis.append(c)
 
         # Reglas estrictas (sin fuzzy): validar solo si fecha y monto coinciden y es único el monto en ese día
         # Construir contadores por fecha para movimientos y CFDIs (ya filtrados por monto ~==)
         from collections import defaultdict
+        
+        def normalizar_fecha(fecha):
+            """Normaliza fecha a tipo date para comparación consistente"""
+            if hasattr(fecha, 'date'):
+                return fecha.date()
+            return fecha
+        
         movs_por_fecha = defaultdict(int)
         for m in movimientos:
-            movs_por_fecha[m.fecha] += 1
+            fecha_normalizada = normalizar_fecha(m.fecha)
+            movs_por_fecha[fecha_normalizada] += 1
 
         def obtener_fecha_cfdi(c):
             f = c.fecha or c.fecha_timbrado
-            if hasattr(f, 'date'):
-                return f.date()
-            return f
+            return normalizar_fecha(f)
 
         cfdis_por_fecha = defaultdict(int)
         for c in cfdis:
@@ -453,44 +523,110 @@ async def obtener_detalle_monto(
 
         movimientos_out = []
         for m in sorted(movimientos, key=lambda x: (x.fecha, x.id)):
-            es_unico_mov_dia = movs_por_fecha.get(m.fecha, 0) == 1
-            es_unico_cfdi_dia = cfdis_por_fecha.get(m.fecha, 0) == 1
+            fecha_normalizada = normalizar_fecha(m.fecha)
+            count_movs = movs_por_fecha.get(fecha_normalizada, 0)
+            count_cfdis = cfdis_por_fecha.get(fecha_normalizada, 0)
+            es_unico_mov_dia = count_movs == 1
+            es_unico_cfdi_dia = count_cfdis == 1
             valido = es_unico_mov_dia and es_unico_cfdi_dia
 
             if not es_unico_mov_dia:
-                razon = f"Pendiente de revisión: montos duplicados en fecha {m.fecha.isoformat()}"
-            elif cfdis_por_fecha.get(m.fecha, 0) == 0:
-                razon = f"Pendiente de revisión: sin CFDI de mismo monto en fecha {m.fecha.isoformat()}"
+                razon = f"Pendiente de revisión: {count_movs} movimientos con mismo monto en fecha {fecha_normalizada}"
+            elif count_cfdis == 0:
+                razon = f"Pendiente de revisión: sin CFDI de mismo monto en fecha {fecha_normalizada}"
             elif not es_unico_cfdi_dia:
-                razon = f"Pendiente de revisión: múltiples CFDI de mismo monto en fecha {m.fecha.isoformat()}"
+                razon = f"Pendiente de revisión: {count_cfdis} CFDIs con mismo monto en fecha {fecha_normalizada}"
             else:
-                razon = f"Exacta PUE en mismo día (único)"
+                razon = f"Exacta en mismo día (único): 1 mov + 1 CFDI"
 
             movimientos_out.append({
                 "fecha": m.fecha.isoformat() if m.fecha else None,
                 "concepto": m.concepto,
                 "referencia": m.referencia,
                 "monto": float(m.monto) if m.monto is not None else None,
-                "cargo_abono": m.tipo.value if m.tipo else "ABONO",
+                "cargo_abono": m.tipo.value if m.tipo else "abono",
                 "estado_conciliacion": "exacta" if valido else "pendiente",
                 "estado": razon,
                 "valido": valido
             })
 
-        cfdis_out = []
+        # Obtener RFC de la empresa para comparar con emisor/receptor
+        empresa = db.query(EmpresaContribuyente).filter(
+            EmpresaContribuyente.id == empresa_id
+        ).first()
+        empresa_rfc = empresa.rfc if empresa else None
+
+        # Separar CFDIs por Ingreso (empresa como emisor) y Egreso (empresa como receptor)
+        cfdis_ingreso = []
+        cfdis_egreso = []
+        
         for c in sorted(cfdis, key=lambda x: ((x.fecha or x.fecha_timbrado), (x.uuid or ""))):
             f = obtener_fecha_cfdi(c)
             es_unico_cfdi_dia = cfdis_por_fecha.get(f, 0) == 1
             es_unico_mov_dia = movs_por_fecha.get(f, 0) == 1
             valido = es_unico_cfdi_dia and es_unico_mov_dia
-            cfdis_out.append({
+            
+            # Debug: log CFDI tipo P
+            if c.tipo_comprobante == 'P':
+                logger.info(f"🔍 Procesando CFDI P: UUID={c.uuid}, metodo_pago={c.metodo_pago}, total={c.total}")
+            
+            # Obtener monto de complemento de pago si es tipo P
+            monto_pago = None
+            if c.tipo_comprobante == 'P':
+                complemento = db.query(ComplementoPago).filter(
+                    ComplementoPago.cfdi_id == c.id
+                ).first()
+                if complemento and complemento.monto_pago:
+                    monto_pago = float(complemento.monto_pago)
+                    logger.info(f"✅ CFDI P {c.uuid}: monto_pago={monto_pago}")
+                else:
+                    logger.warning(f"⚠️ CFDI P {c.uuid}: sin complemento o monto_pago")
+            
+            # Determinar método de pago a mostrar (normalizar P y PUE)
+            metodo_mostrar = c.metodo_pago
+            if c.tipo_comprobante == 'P':
+                # En CFDI P el metodo puede venir NULL; mostrar PUE por claridad de cobro inmediato
+                metodo_mostrar = c.metodo_pago or 'PUE'
+                logger.info(f"🔧 CFDI P {c.uuid}: metodo_pago original={c.metodo_pago}, normalizado={metodo_mostrar}")
+            
+            cfdi_data = {
                 "uuid": c.uuid,
                 "fecha": f.isoformat() if f else None,
                 "total": float(c.total) if c.total is not None else None,
+                "monto_pago": monto_pago,  # Para pagos tipo P
                 "nombre_receptor": c.nombre_receptor,
-                "metodo_pago": c.metodo_pago,
+                "nombre_emisor": c.nombre_emisor,
+                "rfc_emisor": c.rfc_emisor,
+                "rfc_receptor": c.rfc_receptor,
+                "metodo_pago": metodo_mostrar,
+                "tipo_comprobante": c.tipo_comprobante,
                 "valido": valido
-            })
+            }
+            
+            # Si la empresa es emisor -> Ingreso, si es receptor -> Egreso
+            if c.rfc_emisor == empresa_rfc:  # La empresa es el emisor
+                cfdis_ingreso.append(cfdi_data)
+            elif c.rfc_receptor == empresa_rfc:  # La empresa es el receptor
+                cfdis_egreso.append(cfdi_data)
+            else:
+                # En caso de que no coincida ninguno, agregarlo a ingreso por defecto
+                cfdis_ingreso.append(cfdi_data)
+
+        # Separar movimientos por CARGO/ABONO y normalizar según rol de la empresa
+        # Regla: si la empresa es emisor (Ingreso), deben ser ABONOS; si es receptor (Egreso), deben ser CARGOS.
+        movimientos_cargo = [m for m in movimientos_out if m.get("cargo_abono") == "cargo"]
+        movimientos_abono = [m for m in movimientos_out if m.get("cargo_abono") == "abono"]
+
+        # Si hay CFDIs ingreso, filtrar movimientos a solo abonos; si hay CFDIs egreso, solo cargos
+        if cfdis_ingreso and not cfdis_egreso:
+            movimientos_cargo = []
+        elif cfdis_egreso and not cfdis_ingreso:
+            movimientos_abono = []
+
+        # Debug: contar CFDI tipo P
+        cfdis_p_ingreso = [c for c in cfdis_ingreso if c.get('tipo_comprobante') == 'P']
+        cfdis_p_egreso = [c for c in cfdis_egreso if c.get('tipo_comprobante') == 'P']
+        logger.info(f"📊 CFDI tipo P enviados: {len(cfdis_p_ingreso)} ingreso + {len(cfdis_p_egreso)} egreso = {len(cfdis_p_ingreso) + len(cfdis_p_egreso)} total")
 
         return {
             "empresa_id": empresa_id,
@@ -499,7 +635,12 @@ async def obtener_detalle_monto(
             "fecha_fin": fecha_fin,
             "solo_pue": solo_pue,
             "tolerancia": tol,
-            "cfdis": cfdis_out,
+            "cfdis_ingreso": cfdis_ingreso,
+            "cfdis_egreso": cfdis_egreso,
+            "movimientos_cargo": movimientos_cargo,
+            "movimientos_abono": movimientos_abono,
+            # Mantener compatibilidad con versión anterior
+            "cfdis": cfdis_ingreso + cfdis_egreso,
             "movimientos": movimientos_out
         }
 

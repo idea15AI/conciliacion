@@ -422,16 +422,16 @@
     <div class="container">
         <div class="header">
             <h1>🏦 Conciliación Bancaria</h1>
-            <p>Sistema inteligente de conciliación con prioridad PUE, monto y fecha</p>
+            <p>Sistema inteligente de conciliación con prioridad PUE y P, monto y fecha</p>
         </div>
 
         <div class="controls">
-            <h3>⚙️ Configuración de Conciliación</h3>
+            <h3>⚙️ Configuración de Conciliación (PUE y P)</h3>
             
             <div class="form-group">
                 <div class="form-item">
                     <label for="empresaId">Empresa ID</label>
-                    <input type="number" id="empresaId" value="1" min="1">
+                    <input type="number" id="empresaId" value="2" min="1">
                 </div>
                 <div class="form-item">
                     <label for="fechaInicio">Fecha Inicio</label>
@@ -448,13 +448,7 @@
                 <div class="form-item">
                     <div class="checkbox-group">
                         <input type="checkbox" id="soloPue" checked>
-                        <label for="soloPue">Solo PUE (Pago en Una Exhibición)</label>
-                    </div>
-                </div>
-                <div class="form-item">
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="incluirPpd">
-                        <label for="incluirPpd">Incluir PPD (Complementos de Pago)</label>
+                        <label for="soloPue">Solo PUE (Pago en Una Exhibición) - P siempre incluido</label>
                     </div>
                 </div>
                 <div class="form-item">
@@ -475,10 +469,7 @@
             <div id="error" class="error" style="display: none;"></div>
             <div id="success" class="success" style="display: none;"></div>
 
-            <div id="configInfo" class="config-info" style="display: none;">
-                <strong>🔧 Configuración Aplicada:</strong>
-                <div class="config-grid" id="configGrid"></div>
-            </div>
+           
 
             <div id="resultsSummary" class="results-header" style="display: none;">
                 <div class="results-summary" id="summaryGrid"></div>
@@ -508,7 +499,6 @@
                         <th>Monto (Banco vs CFDI)</th>
                         <th>CFDI ID</th>
                         <th>Estado</th>
-                        <th>Puntaje</th>
                         <th>Razón</th>
                         <th>Receptor</th>
                     </tr>
@@ -522,12 +512,29 @@
         let currentData = null;
 
         async function ejecutarConciliacion() {
-            const empresaId = document.getElementById('empresaId').value;
-            const fechaInicio = document.getElementById('fechaInicio').value;
-            const fechaFin = document.getElementById('fechaFin').value;
-            const soloPue = document.getElementById('soloPue').checked;
-            const incluirPpd = document.getElementById('incluirPpd').checked;
-            const umbralFuzzy = 0; // Fuzzy desactivado
+            console.log('🚀 Iniciando ejecutarConciliacion...');
+            
+            // Verificar que todos los elementos existan
+            const empresaIdEl = document.getElementById('empresaId');
+            const fechaInicioEl = document.getElementById('fechaInicio');
+            const fechaFinEl = document.getElementById('fechaFin');
+            const soloPueEl = document.getElementById('soloPue');
+            
+            if (!empresaIdEl || !fechaInicioEl || !fechaFinEl || !soloPueEl) {
+                console.error('❌ No se encontraron todos los elementos del formulario');
+                showError('❌ Error: No se encontraron todos los elementos del formulario');
+                return;
+            }
+            
+            const empresaId = empresaIdEl.value;
+            const fechaInicio = fechaInicioEl.value;
+            const fechaFin = fechaFinEl.value;
+            const soloPue = soloPueEl.checked;
+            const incluirPpd = false; // PPD siempre excluido
+            
+            console.log('📝 Datos del formulario:', {
+                empresaId, fechaInicio, fechaFin, soloPue, incluirPpd
+            });
             
             showLoading();
             hideMessages();
@@ -541,11 +548,12 @@
                 if (fechaFin) params.append('fecha_fin', fechaFin);
                 params.append('solo_pue', soloPue);
                 params.append('incluir_ppd', incluirPpd);
-                // Fuzzy desactivado
                 
                 if (params.toString()) {
                     url += '?' + params.toString();
                 }
+                
+                console.log('🌐 URL de la petición:', url);
                 
                 const response = await fetch(url, {
                     method: 'POST',
@@ -554,18 +562,23 @@
                     }
                 });
                 
+                console.log('📡 Respuesta recibida:', response.status, response.statusText);
+                
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    const errorText = await response.text();
+                    console.error('❌ Error de servidor:', errorText);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
                 }
                 
                 const data = await response.json();
+                console.log('📊 Datos recibidos:', data);
+                
                 currentData = data;
                 showResults(data);
-                showConfigInfo(soloPue, incluirPpd, umbralFuzzy);
                 showSuccess('✅ Conciliación ejecutada exitosamente');
                 
             } catch (error) {
-                console.error('Error:', error);
+                console.error('💥 Error completo:', error);
                 showError(`❌ Error ejecutando conciliación: ${error.message}`);
             } finally {
                 hideLoading();
@@ -611,11 +624,21 @@
         }
 
         function showResults(data) {
-            showSummary(data.resumen || {});
+            console.log('📋 showResults llamada con data completa:', data);
+            console.log('📊 data.resumen:', data.resumen);
+            console.log('📝 data.detalles:', data.detalles);
+            console.log('📝 data.detalles length:', data.detalles ? data.detalles.length : 'undefined');
+            
+            if (data.detalles && data.detalles.length > 0) {
+                console.log('📝 Primer detalle:', data.detalles[0]);
+            }
+            
+          
             showMovements(data.detalles || []);
             showTable();
             // cargar tabla de montos agregados para el rango
             cargarMontos();
+            // Configuración minimalista - sin mostrar detalles
         }
 
         function showReporte(data) {
@@ -623,7 +646,6 @@
                 resumen: {
                     total_movimientos: data.total_movimientos,
                     conciliados_exactos: data.estados?.CONCILIADO || 0,
-                    conciliados_fuzzy: 0,
                     pendientes_revision: data.estados?.PENDIENTE || 0,
                     porcentaje_automatizado: data.estados?.CONCILIADO ? 
                         ((data.estados.CONCILIADO / data.total_movimientos) * 100) : 0
@@ -632,6 +654,7 @@
             };
             
             showResults(reporteData);
+            // Configuración minimalista - sin mostrar detalles
         }
 
         async function cargarMontos() {
@@ -684,6 +707,19 @@
         }
 
         function mostrarModalComparacion(data) {
+            // Debug: mostrar datos recibidos
+            console.log('🔍 Datos recibidos en modal:', data);
+            console.log('🔍 movimientos_abono:', data.movimientos_abono);
+            console.log('🔍 movimientos_cargo:', data.movimientos_cargo);
+            console.log('🔍 cfdis_ingreso:', data.cfdis_ingreso);
+            console.log('🔍 cfdis_egreso:', data.cfdis_egreso);
+            
+            // Verificar si hay CFDIs tipo P
+            const cfdis_tipo_p_ingreso = (data.cfdis_ingreso || []).filter(c => c.tipo_comprobante === 'P');
+            const cfdis_tipo_p_egreso = (data.cfdis_egreso || []).filter(c => c.tipo_comprobante === 'P');
+            console.log('🔍 CFDIs tipo P en ingreso:', cfdis_tipo_p_ingreso);
+            console.log('🔍 CFDIs tipo P en egreso:', cfdis_tipo_p_egreso);
+            
             // Crear modal minimalista y organizado
             const overlay = document.createElement('div');
             overlay.style.position = 'fixed';
@@ -742,69 +778,215 @@
             grid.style.gap = '32px';
 
             const left = document.createElement('div');
-            left.innerHTML = `<h3 style="margin: 0 0 16px 0; color: #34495e; font-size: 1.4em; border-bottom: 1px solid #bdc3c7; padding-bottom: 8px;">📄 CFDI (${data.cfdis.length})</h3>`;
             const right = document.createElement('div');
-            right.innerHTML = `<h3 style="margin: 0 0 16px 0; color: #34495e; font-size: 1.4em; border-bottom: 1px solid #bdc3c7; padding-bottom: 8px;">🏦 Movimientos (${data.movimientos.length})</h3>`;
+            
+            // Título principal para CFDIs
+            left.innerHTML = `<h3 style="margin: 0 0 24px 0; color: #34495e; font-size: 1.6em; border-bottom: 2px solid #bdc3c7; padding-bottom: 8px; text-align: center;">📄 CFDI</h3>`;
+            
+            // Sección destacada para Complementos de pago (CFDI tipo P)
+            const cfdisPIngreso = (data.cfdis_ingreso || []).filter(c => c.tipo_comprobante === 'P');
+            const cfdisPEgreso = (data.cfdis_egreso || []).filter(c => c.tipo_comprobante === 'P');
+            const totalP = (cfdisPIngreso.length + cfdisPEgreso.length);
+            if (totalP > 0) {
+                const cfdiPSection = document.createElement('div');
+                cfdiPSection.style.marginBottom = '24px';
+                cfdiPSection.innerHTML = `<h4 style="margin: 0 0 12px 0; color: #8e44ad; font-size: 1.1em; border-bottom: 1px solid #c39bd3; padding-bottom: 6px;">🔗 Complementos de pago (P) - ${totalP}</h4>`;
 
-            const cfdiTable = document.createElement('table');
-            cfdiTable.style.width = '100%';
-            cfdiTable.style.borderCollapse = 'collapse';
-            cfdiTable.style.fontSize = '13px';
-            cfdiTable.innerHTML = `
+                const cfdiPTable = document.createElement('table');
+                cfdiPTable.style.width = '100%';
+                cfdiPTable.style.borderCollapse = 'collapse';
+                cfdiPTable.style.fontSize = '12px';
+                cfdiPTable.style.marginBottom = '8px';
+                const rowsP = [...cfdisPIngreso.map(c => ({...c, __rol: 'Ingreso'})), ...cfdisPEgreso.map(c => ({...c, __rol: 'Egreso'}))];
+                cfdiPTable.innerHTML = `
+                    <thead>
+                        <tr style="background: #f3e5f5; border-bottom: 2px solid #c39bd3;">
+                            <th style="padding: 8px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">UUID</th>
+                            <th style="padding: 8px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">FECHA</th>
+                            <th style="padding: 8px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">ROL</th>
+                            <th style="padding: 8px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">CONTRA PARTE</th>
+                            <th style="padding: 8px 6px; text-align: right; font-weight: 600; color: #2c3e50; font-size: 11px;">MONTO PAGO</th>
+                            <th style="padding: 8px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">MÉTODO</th>
+                            <th style="padding: 8px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">ESTATUS</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsP.map((c, index) => `
+                            <tr style="border-bottom: 1px solid #ecf0f1; ${index % 2 === 0 ? 'background: #ffffff' : 'background: #faf5ff'}">
+                                <td style="padding: 8px 6px; font-family: monospace; font-size: 10px; color: #7f8c8d;">${c.uuid || ''}</td>
+                                <td style="padding: 8px 6px; font-weight: 500; color: #2c3e50; font-size: 11px;">${formatDateSimple(c.fecha)}</td>
+                                <td style="padding: 8px 6px; text-align: center; font-weight: 700; color: ${c.__rol === 'Ingreso' ? '#27ae60' : '#e74c3c'};">${c.__rol}</td>
+                                <td style="padding: 8px 6px; color: #34495e; font-size: 11px;">${c.__rol === 'Ingreso' ? (c.nombre_receptor || '') : (c.nombre_emisor || '')}</td>
+                                <td style="padding: 8px 6px; text-align: right; font-weight: 700; color: #27ae60;">${c.monto_pago ? `$${Number(c.monto_pago).toFixed(2)}` : ''}</td>
+                                <td style="padding: 8px 6px; text-align: center; color: #8e44ad; font-weight: 600; font-size: 11px;">${c.metodo_pago || 'PUE'}</td>
+                                <td style="padding: 8px 6px; text-align: center; font-size: 11px; font-weight: 700; color: ${c.valido ? '#27ae60' : '#e74c3c'};">${c.valido ? 'ÚNICO' : 'REVISIÓN'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                `;
+                cfdiPSection.appendChild(cfdiPTable);
+                left.appendChild(cfdiPSection);
+            }
+
+            // Título principal para Movimientos
+            right.innerHTML = `<h3 style="margin: 0 0 24px 0; color: #34495e; font-size: 1.6em; border-bottom: 2px solid #bdc3c7; padding-bottom: 8px; text-align: center;">🏦 Movimientos</h3>`;
+
+            // CFDI Ingreso (Empresa como Emisor)
+            const cfdiIngresoSection = document.createElement('div');
+            cfdiIngresoSection.style.marginBottom = '32px';
+            cfdiIngresoSection.innerHTML = `<h4 style="margin: 0 0 16px 0; color: #27ae60; font-size: 1.2em; border-bottom: 1px solid #a9dfbf; padding-bottom: 8px;">💰 Ingreso (Empresa como Emisor) - ${data.cfdis_ingreso?.length || 0}</h4>`;
+            
+            const cfdiIngresoTable = document.createElement('table');
+            cfdiIngresoTable.style.width = '100%';
+            cfdiIngresoTable.style.borderCollapse = 'collapse';
+            cfdiIngresoTable.style.fontSize = '12px';
+            cfdiIngresoTable.style.marginBottom = '24px';
+            cfdiIngresoTable.innerHTML = `
                 <thead>
-                    <tr style="background: #ecf0f1; border-bottom: 2px solid #bdc3c7;">
-                        <th style="padding: 12px 8px; text-align: left; font-weight: 600; color: #2c3e50;">UUID</th>
-                        <th style="padding: 12px 8px; text-align: left; font-weight: 600; color: #2c3e50;">FECHA</th>
-                        <th style="padding: 12px 8px; text-align: left; font-weight: 600; color: #2c3e50;">RECEPTOR</th>
-                        <th style="padding: 12px 8px; text-align: center; font-weight: 600; color: #2c3e50;">MÉTODO</th>
-                        <th style="padding: 12px 8px; text-align: center; font-weight: 600; color: #2c3e50;">ESTATUS</th>
-                       
+                    <tr style="background: #d5f4e6; border-bottom: 2px solid #a9dfbf;">
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">UUID</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">FECHA</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">RECEPTOR</th>
+                        <th style="padding: 10px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">TIPO</th>
+                        <th style="padding: 10px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">MÉTODO</th>
+                        <th style="padding: 10px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">ESTATUS</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${data.cfdis.map((c, index) => `
-                        <tr style="border-bottom: 1px solid #ecf0f1; ${index % 2 === 0 ? 'background: #ffffff' : 'background: #f8f9fa'}">
-                            <td style="padding: 10px 8px; font-family: monospace; font-size: 11px; color: #7f8c8d;">${c.uuid || ''}</td>
-                            <td style="padding: 10px 8px; font-weight: 500; color: #2c3e50;">${formatDateSimple(c.fecha)}</td>
-                            <td style="padding: 10px 8px; color: #34495e;">${c.nombre_receptor || ''}</td>
-                            <td style="padding: 10px 8px; text-align: center; color: #27ae60; font-weight: 600;">${c.metodo_pago || ''}</td>
-                            <td style="padding: 10px 8px; text-align: center; font-size: 12px; font-weight: 700; color: ${c.valido ? '#27ae60' : '#e74c3c'};">${c.valido ? 'UNICO' : 'REVISIÓN'}</td>
+                    ${(data.cfdis_ingreso || []).map((c, index) => {
+                        // Mostrar monto de pago para tipo P, total para otros tipos
+                        const montoMostrar = c.tipo_comprobante === 'P' && c.monto_pago ? 
+                            `$${Number(c.monto_pago).toFixed(2)}` : 
+                            (c.total ? `$${Number(c.total).toFixed(2)}` : '');
+                        
+                        return `
+                            <tr style="border-bottom: 1px solid #ecf0f1; ${index % 2 === 0 ? 'background: #ffffff' : 'background: #f8fffe'}">
+                                <td style="padding: 8px 6px; font-family: monospace; font-size: 10px; color: #7f8c8d;">${c.uuid || ''}</td>
+                                <td style="padding: 8px 6px; font-weight: 500; color: #2c3e50; font-size: 11px;">${formatDateSimple(c.fecha)}</td>
+                                <td style="padding: 8px 6px; color: #34495e; font-size: 11px;">${c.nombre_receptor || ''}</td>
+                                <td style="padding: 8px 6px; text-align: center; color: ${c.tipo_comprobante === 'P' ? '#e67e22' : '#3498db'}; font-weight: 600; font-size: 11px;">
+                                    ${c.tipo_comprobante === 'I' ? 'I PUE' : (c.tipo_comprobante === 'P' ? 'P' : c.tipo_comprobante)}
+                                    ${c.tipo_comprobante === 'P' && c.monto_pago ? '<br><small style="color: #27ae60;">' + montoMostrar + '</small>' : ''}
+                                </td>
+                                <td style="padding: 8px 6px; text-align: center; color: #27ae60; font-weight: 600; font-size: 11px;">${c.metodo_pago || 'PUE'}</td>
+                                <td style="padding: 8px 6px; text-align: center; font-size: 11px; font-weight: 700; color: ${c.valido ? '#27ae60' : '#e74c3c'};">${c.valido ? 'COINCIDENCIA' : 'REVISIÓN'}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            `;
+
+            // CFDI Egreso (Empresa como Receptor)
+            const cfdiEgresoSection = document.createElement('div');
+            cfdiEgresoSection.innerHTML = `<h4 style="margin: 0 0 16px 0; color: #e74c3c; font-size: 1.2em; border-bottom: 1px solid #f1948a; padding-bottom: 8px;">💸 Egreso (Empresa como Receptor) - ${data.cfdis_egreso?.length || 0}</h4>`;
+            
+            const cfdiEgresoTable = document.createElement('table');
+            cfdiEgresoTable.style.width = '100%';
+            cfdiEgresoTable.style.borderCollapse = 'collapse';
+            cfdiEgresoTable.style.fontSize = '12px';
+            cfdiEgresoTable.innerHTML = `
+                <thead>
+                    <tr style="background: #fadbd8; border-bottom: 2px solid #f1948a;">
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">UUID</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">FECHA</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">EMISOR</th>
+                        <th style="padding: 10px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">MÉTODO</th>
+                        <th style="padding: 10px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">ESTATUS</th>
+                        <th style="padding: 10px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">TIPO</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${(data.cfdis_egreso || []).map((c, index) => `
+                        <tr style="border-bottom: 1px solid #ecf0f1; ${index % 2 === 0 ? 'background: #ffffff' : 'background: #fffafa'}">
+                            <td style="padding: 8px 6px; font-family: monospace; font-size: 10px; color: #7f8c8d;">${c.uuid || ''}</td>
+                            <td style="padding: 8px 6px; font-weight: 500; color: #2c3e50; font-size: 11px;">${formatDateSimple(c.fecha)}</td>
+                            <td style="padding: 8px 6px; color: #34495e; font-size: 11px;">${c.nombre_emisor || ''}</td>
+                            <td style="padding: 8px 6px; text-align: center; color: #e74c3c; font-weight: 600; font-size: 11px;">${c.metodo_pago || 'PUE'}</td>
+                            <td style="padding: 8px 6px; text-align: center; font-size: 11px; font-weight: 700; color: ${c.valido ? '#27ae60' : '#e74c3c'};">${c.valido ? 'COINCIDENCIA' : 'REVISIÓN'}</td>
+                            <td style="padding: 8px 6px; text-align: center; font-size: 11px; font-weight: 700; color: ${c.tipo_comprobante === 'P' ? '#e67e22' : '#3498db'};">${c.tipo_comprobante === 'I' ? 'I PUE' : (c.tipo_comprobante === 'P' ? 'P' : c.tipo_comprobante)}</td>
                         </tr>
                     `).join('')}
                 </tbody>
             `;
 
-            const movTable = document.createElement('table');
-            movTable.style.width = '100%';
-            movTable.style.borderCollapse = 'collapse';
-            movTable.style.fontSize = '13px';
-            movTable.innerHTML = `
+            // Movimientos ABONO (Entradas)
+            const movAbonoSection = document.createElement('div');
+            movAbonoSection.style.marginBottom = '32px';
+            movAbonoSection.innerHTML = `<h4 style="margin: 0 0 16px 0; color: #27ae60; font-size: 1.2em; border-bottom: 1px solid #a9dfbf; padding-bottom: 8px;">💰 ABONOS (Entradas) - ${data.movimientos_abono?.length || 0}</h4>`;
+            
+            const movAbonoTable = document.createElement('table');
+            movAbonoTable.style.width = '100%';
+            movAbonoTable.style.borderCollapse = 'collapse';
+            movAbonoTable.style.fontSize = '12px';
+            movAbonoTable.style.marginBottom = '24px';
+            movAbonoTable.innerHTML = `
                 <thead>
-                    <tr style="background: #ecf0f1; border-bottom: 2px solid #bdc3c7;">
-                        <th style="padding: 12px 8px; text-align: left; font-weight: 600; color: #2c3e50;">FECHA</th>
-                        <th style="padding: 12px 8px; text-align: left; font-weight: 600; color: #2c3e50;">CONCEPTO</th>
-                        <th style="padding: 12px 8px; text-align: left; font-weight: 600; color: #2c3e50;">REFERENCIA</th>
-                        <th style="padding: 12px 8px; text-align: center; font-weight: 600; color: #2c3e50;">CARGO/ABONO</th>
-                        <th style="padding: 12px 8px; text-align: left; font-weight: 600; color: #2c3e50;">ESTADO</th>
-                        <th style="padding: 12px 8px; text-align: center; font-weight: 600; color: #2c3e50;">ESTATUS</th>
+                    <tr style="background: #d5f4e6; border-bottom: 2px solid #a9dfbf;">
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">FECHA</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">CONCEPTO</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">REFERENCIA</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">ESTADO</th>
+                        <th style="padding: 10px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">ESTATUS</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${data.movimientos.map((m, index) => `
-                        <tr style="border-bottom: 1px solid #ecf0f1; ${index % 2 === 0 ? 'background: #ffffff' : 'background: #f8f9fa'}">
-                            <td style="padding: 10px 8px; font-weight: 500; color: #2c3e50;">${formatDateSimple(m.fecha)}</td>
-                            <td style="padding: 10px 8px; color: #34495e;">${m.concepto || ''}</td>
-                            <td style="padding: 10px 8px; color: #7f8c8d; font-family: monospace; font-size: 11px;">${m.referencia || ''}</td>
-                            <td style="padding: 10px 8px; text-align: center; color: ${m.cargo_abono === 'CARGO' ? '#e74c3c' : '#27ae60'}; font-weight: 600; font-size: 12px;">${m.cargo_abono || 'ABONO'}</td>
-                            <td style="padding: 10px 8px; text-align: left; color: #34495e; font-size: 11px; max-width: 200px; word-wrap: break-word;">${m.estado || 'Pendiente de revisión'}</td>
-                            <td style="padding: 10px 8px; text-align: center; font-size: 12px; font-weight: 700; color: ${m.estado_conciliacion === 'exacta' ? '#27ae60' : '#e74c3c'};">${m.estado_conciliacion === 'exacta' ? 'CONCILIADO' : 'REVISIÓN'}</td>
+                    ${(data.movimientos_abono || []).map((m, index) => `
+                        <tr style="border-bottom: 1px solid #ecf0f1; ${index % 2 === 0 ? 'background: #ffffff' : 'background: #f8fffe'}">
+                            <td style="padding: 8px 6px; font-weight: 500; color: #2c3e50; font-size: 11px;">${formatDateSimple(m.fecha)}</td>
+                            <td style="padding: 8px 6px; color: #34495e; font-size: 11px;">${m.concepto || ''}</td>
+                            <td style="padding: 8px 6px; color: #7f8c8d; font-family: monospace; font-size: 10px;">${m.referencia || ''}</td>
+                            <td style="padding: 8px 6px; text-align: left; color: #34495e; font-size: 10px; max-width: 150px; word-wrap: break-word;">${m.estado || 'Pendiente de revisión'}</td>
+                            <td style="padding: 8px 6px; text-align: center; font-size: 11px; font-weight: 700; color: ${m.estado_conciliacion === 'exacta' ? '#27ae60' : '#e74c3c'};">${m.estado_conciliacion === 'exacta' ? 'COINCIDENCIA' : 'REVISIÓN'}</td>
                         </tr>
                     `).join('')}
                 </tbody>
             `;
 
-            left.appendChild(cfdiTable);
-            right.appendChild(movTable);
+            // Movimientos CARGO (Salidas)
+            const movCargoSection = document.createElement('div');
+            movCargoSection.innerHTML = `<h4 style="margin: 0 0 16px 0; color: #e74c3c; font-size: 1.2em; border-bottom: 1px solid #f1948a; padding-bottom: 8px;">💸 CARGOS (Salidas) - ${data.movimientos_cargo?.length || 0}</h4>`;
+            
+            const movCargoTable = document.createElement('table');
+            movCargoTable.style.width = '100%';
+            movCargoTable.style.borderCollapse = 'collapse';
+            movCargoTable.style.fontSize = '12px';
+            movCargoTable.innerHTML = `
+                <thead>
+                    <tr style="background: #fadbd8; border-bottom: 2px solid #f1948a;">
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">FECHA</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">CONCEPTO</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">REFERENCIA</th>
+                        <th style="padding: 10px 6px; text-align: left; font-weight: 600; color: #2c3e50; font-size: 11px;">ESTADO</th>
+                        <th style="padding: 10px 6px; text-align: center; font-weight: 600; color: #2c3e50; font-size: 11px;">ESTATUS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${(data.movimientos_cargo || []).map((m, index) => `
+                        <tr style="border-bottom: 1px solid #ecf0f1; ${index % 2 === 0 ? 'background: #ffffff' : 'background: #fffafa'}">
+                            <td style="padding: 8px 6px; font-weight: 500; color: #2c3e50; font-size: 11px;">${formatDateSimple(m.fecha)}</td>
+                            <td style="padding: 8px 6px; color: #34495e; font-size: 11px;">${m.concepto || ''}</td>
+                            <td style="padding: 8px 6px; color: #7f8c8d; font-family: monospace; font-size: 10px;">${m.referencia || ''}</td>
+                            <td style="padding: 8px 6px; text-align: left; color: #34495e; font-size: 10px; max-width: 150px; word-wrap: break-word;">${m.estado || 'Pendiente de revisión'}</td>
+                            <td style="padding: 8px 6px; text-align: center; font-size: 11px; font-weight: 700; color: ${m.estado_conciliacion === 'exacta' ? '#27ae60' : '#e74c3c'};">${m.estado_conciliacion === 'exacta' ? 'COINCIDENCIA' : 'REVISIÓN'}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+
+            // Agregar secciones CFDI al lado izquierdo
+            cfdiIngresoSection.appendChild(cfdiIngresoTable);
+            left.appendChild(cfdiIngresoSection);
+            
+            cfdiEgresoSection.appendChild(cfdiEgresoTable);
+            left.appendChild(cfdiEgresoSection);
+
+            // Agregar secciones de Movimientos al lado derecho
+            movAbonoSection.appendChild(movAbonoTable);
+            right.appendChild(movAbonoSection);
+            
+            movCargoSection.appendChild(movCargoTable);
+            right.appendChild(movCargoSection);
+
             grid.appendChild(left);
             grid.appendChild(right);
 
@@ -858,134 +1040,82 @@
             }
         }
 
-        function showSummary(resumen) {
-            const summaryGrid = document.getElementById('summaryGrid');
-            summaryGrid.innerHTML = `
-                <div class="summary-card">
-                    <div class="summary-number">${resumen.total_movimientos || 0}</div>
-                    <div class="summary-label">Total Movimientos</div>
-                </div>
-                <div class="summary-card">
-                    <div class="summary-number">${resumen.conciliados_exactos || 0}</div>
-                    <div class="summary-label">Conciliados Exactos</div>
-                </div>
-                <div class="summary-card">
-                    <div class="summary-number">${resumen.conciliados_fuzzy || 0}</div>
-                    <div class="summary-label">Conciliados Fuzzy</div>
-                </div>
-                <div class="summary-card">
-                    <div class="summary-number">${resumen.pendientes_revision || 0}</div>
-                    <div class="summary-label">Pendientes Revisión</div>
-                </div>
-                <div class="summary-card warning">
-                    <div class="summary-number">${resumen.duplicados_revision || 0}</div>
-                    <div class="summary-label">Duplicados (Revisión)</div>
-                </div>
-                <div class="summary-card">
-                    <div class="summary-number">${(resumen.porcentaje_automatizado || 0).toFixed(1)}%</div>
-                    <div class="summary-label">Automatizado</div>
-                </div>
-            `;
-            document.getElementById('resultsSummary').style.display = 'block';
-        }
 
-        function showConfigInfo(soloPue, incluirPpd, umbralFuzzy) {
-            const configGrid = document.getElementById('configGrid');
-            configGrid.innerHTML = `
-                <div class="config-item">
-                    <span>PUE:</span>
-                    <span class="config-value">${soloPue ? '✅ Solo PUE' : '❌ Incluye otros'}</span>
-                </div>
-                <div class="config-item">
-                    <span>PPD:</span>
-                    <span class="config-value">${incluirPpd ? '✅ Incluido' : '❌ Excluido'}</span>
-                </div>
-                <div class="config-item">
-                    <span>Umbral Fuzzy:</span>
-                    <span class="config-value">${umbralFuzzy}%</span>
-                </div>
-            `;
-            document.getElementById('configInfo').style.display = 'block';
-        }
+        // Función showConfigInfo eliminada - interfaz minimalista
 
         function showMovements(detalles) {
+            console.log('🔍 showMovements llamada con:', detalles);
+            console.log('📊 Número de detalles:', detalles ? detalles.length : 'detalles es null/undefined');
+            
             const tbody = document.getElementById('movementsBody');
+            if (!tbody) {
+                console.error('❌ No se encontró el elemento movementsBody');
+                return;
+            }
+            
             tbody.innerHTML = '';
             
-            detalles.forEach(detalle => {
-                const row = document.createElement('tr');
-                row.className = `movement-row ${detalle.tipo}`;
-                
-                const statusClass = detalle.tipo === 'exacta' ? 'status-exact' : 
-                                  detalle.tipo === 'fuzzy' ? 'status-fuzzy' : 
-                                  detalle.tipo === 'revision_duplicados' ? 'status-duplicados' : 'status-pending';
-
-                const movMonto = typeof detalle.monto === 'number' ? detalle.monto : (parseFloat(detalle.monto) || 0);
-                const cfdiMontoRaw = detalle.cfdi_monto ?? detalle.cfdi_total ?? null;
-                const cfdiMonto = cfdiMontoRaw != null ? (typeof cfdiMontoRaw === 'number' ? cfdiMontoRaw : (parseFloat(cfdiMontoRaw) || null)) : null;
-                const delta = (cfdiMonto != null) ? (movMonto - cfdiMonto) : null;
-                
-                // Formatear la comparación de montos
-                let montoDisplay = '';
-                if (cfdiMonto != null) {
-                    const diferencia = Math.abs(delta);
-                    const signoDiferencia = delta > 0 ? '+' : '-';
-                    const textoDiferencia = delta !== 0 ? `${signoDiferencia}$${diferencia.toFixed(2)}` : 'Sin diferencia';
-                    const infoDiferencia = delta > 0 ? '(Banco > CFDI)' : delta < 0 ? '(Banco < CFDI)' : '(Coinciden)';
+            if (!detalles || detalles.length === 0) {
+                console.log('⚠️ No hay detalles para mostrar');
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">No hay movimientos para mostrar</td></tr>';
+                return;
+            }
+            
+            console.log(`✅ Procesando ${detalles.length} detalles`);
+            
+            try {
+                detalles.forEach((detalle, index) => {
+                    console.log(`📝 Procesando detalle ${index}:`, detalle);
                     
-                    montoDisplay = `<div class="monto-container">
-                        <div class="monto-row">
-                            <span class="monto-label">Banco:</span>
-                            <span class="monto-banco">$${movMonto.toFixed(2)}</span>
-                        </div>
-                        <div class="monto-row">
-                            <span class="monto-label">CFDI:</span>
-                            <span class="monto-cfdi">$${cfdiMonto.toFixed(2)}</span>
-                        </div>
-                        <div class="monto-row">
-                            <span class="monto-label">Diferencia:</span>
-                            <span class="monto-diferencia">${textoDiferencia}</span>
-                        </div>
-                        <div class="monto-info">${infoDiferencia}</div>
-                    </div>`;
-                } else {
-                    montoDisplay = `<div class="monto-container">
-                        <div class="monto-row">
-                            <span class="monto-label">Banco:</span>
-                            <span class="monto-solo">$${movMonto.toFixed(2)}</span>
-                        </div>
-                        <div class="monto-info">Sin CFDI para comparar</div>
-                    </div>`;
-                }
-
-                // Mostrar receptor si existe
-                const receptorDisplay = detalle.cfdi_receptor ? 
-                    `<div class="receptor-info">👤 ${detalle.cfdi_receptor}</div>` : 'N/A';
-
-                row.innerHTML = `
-                    <td>${detalle.movimiento_id ?? 'N/A'}</td>
-                    <td>${formatDate(detalle.fecha)}</td>
-                    <td>${detalle.concepto || 'N/A'}</td>
-                    <td>${montoDisplay}</td>
-                    <td>${detalle.cfdi_id || 'N/A'}</td>
-                    <td><span class="status-badge ${statusClass}">${detalle.tipo}</span></td>
-                    <td>${detalle.puntaje_fuzzy ? `${detalle.puntaje_fuzzy}%` : 'N/A'}</td>
-                    <td>${detalle.razon || 'N/A'}</td>
-                    <td>${receptorDisplay}</td>
-                `;
+                    const row = document.createElement('tr');
+                    row.className = `movement-row ${detalle.tipo || 'unknown'}`;
+                    
+                    // Simplificar el HTML para evitar errores
+                    const montoDisplay = `$${(detalle.monto || 0).toFixed(2)}`;
+                    const cfdiDisplay = detalle.cfdi_id ? `CFDI-${detalle.cfdi_id}` : 'Sin CFDI';
+                    const fechaDisplay = detalle.fecha || 'N/A';
+                    
+                    row.innerHTML = `
+                        <td>${detalle.movimiento_id || 'N/A'}</td>
+                        <td>${fechaDisplay}</td>
+                        <td>${(detalle.concepto || 'N/A').substring(0, 50)}...</td>
+                        <td>${montoDisplay}</td>
+                        <td>${detalle.cfdi_id || 'N/A'}</td>
+                        <td>${detalle.tipo || 'N/A'}</td>
+                        <td>${(detalle.razon || 'N/A').substring(0, 30)}...</td>
+                        <td>${detalle.cfdi_receptor || 'N/A'}</td>
+                    `;
+                    
+                    tbody.appendChild(row);
+                    
+                    if (index < 5) {
+                        console.log(`✅ Fila ${index} agregada correctamente`);
+                    }
+                });
                 
-                tbody.appendChild(row);
-            });
+                console.log(`✅ Todas las ${detalles.length} filas procesadas`);
+                
+            } catch (error) {
+                console.error('💥 Error procesando movimientos:', error);
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Error al procesar movimientos</td></tr>';
+            }
         }
 
         function showTable() {
-            document.getElementById('movementsTable').style.display = 'table';
+            console.log('📋 showTable() llamada');
+            const table = document.getElementById('movementsTable');
+            if (!table) {
+                console.error('❌ No se encontró el elemento movementsTable');
+                return;
+            }
+            table.style.display = 'table';
+            console.log('✅ Tabla mostrada');
         }
 
         function hideResults() {
             document.getElementById('resultsSummary').style.display = 'none';
             document.getElementById('movementsTable').style.display = 'none';
-            document.getElementById('configInfo').style.display = 'none';
+            // configInfo eliminado - interfaz minimalista
         }
 
         function formatDate(dateString) {
@@ -1025,11 +1155,17 @@
 
         // Configurar fechas por defecto (último mes)
         window.onload = function() {
-            const today = new Date();
-            const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
+            // Configurar fechas para el rango donde hay datos (mayo 2025)
+            const fechaInicio = new Date('2025-05-01');
+            const fechaFin = new Date('2025-05-30');
             
-            document.getElementById('fechaInicio').value = lastMonth.toISOString().split('T')[0];
-            document.getElementById('fechaFin').value = today.toISOString().split('T')[0];
+            document.getElementById('fechaInicio').value = fechaInicio.toISOString().split('T')[0];
+            document.getElementById('fechaFin').value = fechaFin.toISOString().split('T')[0];
+            
+            console.log('📅 Fechas inicializadas:', {
+                inicio: fechaInicio.toISOString().split('T')[0],
+                fin: fechaFin.toISOString().split('T')[0]
+            });
         };
     </script>
 </body>

@@ -2,6 +2,7 @@
 
 import Layout from '@/components/Layout';
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useConciliacionContext } from '@/contexts/ConciliacionContext';
 import { 
   DocumentArrowUpIcon, 
@@ -165,26 +166,21 @@ function TarjetaEstadistica({
   color?: 'green' | 'red' | 'blue' | 'yellow';
   descripcion?: string;
 }) {
-  const colorClasses = {
-    green: 'bg-green-100 text-green-600',
-    red: 'bg-red-100 text-red-600', 
-    blue: 'bg-blue-100 text-blue-600',
-    yellow: 'bg-yellow-100 text-yellow-600'
-  };
+  const bubbleClasses = 'w-10 h-10 rounded-full flex items-center justify-center bg-blue-600 text-white shadow-sm';
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
       <div className="flex items-center">
         <div className="flex-shrink-0">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${colorClasses[color]}`}>
-            <Icon className="w-6 h-6" />
+          <div className={bubbleClasses}>
+            <Icon className="w-5 h-5" />
           </div>
         </div>
         <div className="ml-4 flex-1">
           <p className="text-sm font-medium text-gray-500">{titulo}</p>
           <p className="text-2xl font-semibold text-gray-900">{valor}</p>
           {descripcion && (
-            <p className="text-sm text-gray-600">{descripcion}</p>
+            <p className="text-xs text-green-600 mt-1">{descripcion}</p>
           )}
         </div>
       </div>
@@ -410,21 +406,6 @@ export default function ConciliacionPage() {
   return (
     <Layout>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center">
-            <BanknotesIcon className="w-8 h-8 text-blue-600 mr-3" />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                Conciliación Bancaria
-              </h1>
-              <p className="text-gray-600">
-                {estadisticas?.empresa?.razon_social || 'Empresa'} - {rfcEmpresa}
-              </p>
-            </div>
-          </div>
-        </div>
-
         {loading ? (
           <div className="flex justify-center py-12">
             <ArrowPathIcon className="w-8 h-8 text-blue-600 animate-spin" />
@@ -462,16 +443,30 @@ export default function ConciliacionPage() {
               </div>
             )}
 
-            {/* Acciones principales */}
+            {/* Bloques hero de acciones principales - estilo solicitado */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-              <SubirEstadoCuenta 
-                rfc={rfcEmpresa} 
-                onSuccess={cargarDatos}
-              />
-              <EjecutarConciliacion 
-                rfc={rfcEmpresa} 
-                onSuccess={cargarDatos}
-              />
+              {/* Subir Estado de Cuenta - azul sólido/gradiente */}
+              <div className="relative overflow-hidden rounded-2xl p-8 bg-gradient-to-br from-blue-600 to-blue-500 text-white shadow-md">
+                <div className="max-w-xl">
+                  <h3 className="text-2xl font-semibold mb-2">Subir Estado de Cuenta</h3>
+                  <p className="opacity-90 mb-6">Carga tu archivo PDF para extraer movimientos bancarios automáticamente.</p>
+                  <Link href="/subir-estado" className="inline-flex items-center px-4 py-2 rounded-md bg-white/75 text-gray-700 font-medium hover:bg-white transition shadow">
+                    Ir a Subir Archivo
+                  </Link>
+                </div>
+                <div className="absolute -right-6 bottom-6 opacity-30">
+                  <div className="w-44 h-44 rounded-full bg-white/20" />
+                </div>
+              </div>
+
+              {/* Ejecutar Conciliación - panel oscuro azulado */}
+              <div className="rounded-2xl p-8 bg-slate-900 text-white shadow-md">
+                <h3 className="text-2xl font-semibold mb-2">Ejecutar Conciliación</h3>
+                <p className="opacity-90 mb-6">Configura los parámetros y ejecuta el proceso de conciliación automática.</p>
+                <Link href="/conciliacion" className="inline-flex items-center px-4 py-2 rounded-md bg-gray-700 text-white font-medium hover:bg-gray-900 transition shadow">
+                  Ir a Configuración
+                </Link>
+              </div>
             </div>
 
             {/* Filtros de movimientos */}
