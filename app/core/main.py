@@ -31,7 +31,7 @@ class ErrorResponse(BaseModel):
 from app.conciliacion.routes.conciliacion import router as conciliacion_router
 from app.conciliacion.routes.archivos_bancarios import router as archivos_bancarios_router
 from app.conciliacion.routes.procesar_pdf_unificado import router as procesar_pdf_unificado_router
-from app.conciliacion.routes.conciliacion import router as conciliacion_router
+from app.conciliacion.routes.lista_negra import router as lista_negra_router
 
 
 # Configurar logging
@@ -190,6 +190,13 @@ app.include_router(
     tags=["🎯 Conciliación"]
 )
 
+# Router de Lista Negra SAT
+app.include_router(
+    lista_negra_router,
+    prefix="/api/v1",
+    tags=["🚨 Lista Negra SAT"]
+)
+
 # Montar archivos estáticos
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
@@ -209,8 +216,15 @@ async def root():
         "docs": "/docs",
         "redoc": "/redoc",
         "cors_enabled": True,
-        "frontend_url": "http://localhost:3000"
+        "frontend_url": "http://localhost:3000",
+        "dashboard": "/static/conciliacion_dashboard.html"
     })
+
+@app.get("/dashboard", include_in_schema=False)
+async def dashboard():
+    """Endpoint para el dashboard de conciliación"""
+    from fastapi.responses import FileResponse
+    return FileResponse("frontend/conciliacion_dashboard.html")
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
