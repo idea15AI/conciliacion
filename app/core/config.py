@@ -1,73 +1,86 @@
-import os
-from typing import List
-from pydantic_settings import BaseSettings
+# app/core/settings.py
+from __future__ import annotations
+
+from pathlib import Path
+from typing import List, Optional
+from urllib.parse import quote_plus
+
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
-    # Información de la aplicación
+    # === App ===
     APP_NAME: str = "Sistema de Conciliación Bancaria"
     APP_VERSION: str = "1.0.0"
-    DEBUG: bool = True
-    
-    # Configuración MySQL
-    DB_MSQL_USERNAME: str = "root"
-    DB_MSQL_PASSWORD: str = "NuevaPassword123!"
-    DB_MSQL_DATABASE: str = "alertadefinitivo"
-    DB_MSQL_HOST: str = "localhost"
-    DB_MSQL_PORT: int = 3306
-    DB_MSQL_DIALECT: str = "mysql"
-    
-    # Base de datos (construir URL desde variables MySQL)
-    @property
-    def DATABASE_URL(self) -> str:
-        return f"mysql+pymysql://{self.DB_MSQL_USERNAME}:{self.DB_MSQL_PASSWORD}@{self.DB_MSQL_HOST}:{self.DB_MSQL_PORT}/{self.DB_MSQL_DATABASE}?charset=utf8mb4"
-    
-    # Mantener variables legacy para compatibilidad
-    DB_HOST: str = "localhost"
-    DB_PORT: int = 3306
-    DB_NAME: str = "alertadefinitivo"
-    DB_USER: str = "root"
-    DB_PASSWORD: str = "NuevaPassword123!"
-    
-    # OpenAI API Key para OCR (requerida para conciliación)
-    OPENAI_API_KEY: str = ""
-    #agrega desde mi env 
-    # Gemini API Key para procesamiento de PDFs
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY")
-    
-    # Seguridad
-    SECRET_KEY: str = "your-secret-key-here"
-    
-    # CORS
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
-    
-    # Configuración de logs
-    LOG_LEVEL: str = "INFO"
-    
-    # Configuración de archivos para PDFs bancarios
-    MAX_FILE_SIZE: int = 52428800  # 50MB para PDFs bancarios
-    UPLOAD_FOLDER: str = "uploads/"
-    ALLOWED_EXTENSIONS: str = "pdf"  # Solo PDFs para conciliación
-    
-    # Configuración específica de conciliación
-    CONCILIACION_TOLERANCIA_MONTO: float = 1.00
-    CONCILIACION_DIAS_TOLERANCIA: int = 3
-    CONCILIACION_MAX_FILE_SIZE: int = 52428800  # 50MB
-    
+    DEBUG: bool = False
+
+    # === DB (acepta DB_* y tus actuales DB_MSQL_*) ===
+    # Valores “estándar”
+    DB_HOST: str | None = Field(default=None)
+    DB_PORT: int = Field(default=16751)  # <-- tu puerto por defecto
+    DB_NAME: str | None = Field(default=None)
+    DB_USER: str | None = Field(default=None)
+    DB_PASSWORD: SecretStr = Field(default=SecretStr(""))
+
+    # Aliases alternativos (los de tu .env actual)
+    _DB_HOST_ALT: str | None = Field(default=None, alias="DB_MSQL_HOST")
+    _DB_PORT_ALT: int | None = Field(default=None, alias="DB_MSQL_PORT")
+    _DB_NAME_ALT: str | None = Field(default=None, alias="DB_MSQL_DATABASE")
+    _DB_USER_ALT: str | None = Field(default=None, alias="DB_MSQL_USERNAME")
+    _DB_PASS_ALT: str | None = Field(default=None, alias="DB_MSQL_PASSWORD")
+
+    # === APIs ===
+    OPENAI_API_KEY: Optional[SecretStr] = None
+    GEMINI_API_KEY: Optional[SecretStr] = None
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+
+    # === Seguridad ===
+    SECRET_KEY: SecretStr = SecretStr("change-me")  # define en entorno en prod
+
+    # === CORS / Archivos ===
+    CORS_ORIGINS: str = ""
+    MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50MB
+    UPLOAD_FOLDER: str = "uploads"
+    ALLOWED_EXTENSIONS: str = "pdf"
+
+    # Pydantic Settings v2
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
+    # Normaliza ruta de uploads
+    @field_validator("UPLOAD_FOLDER", mode="before")
+    @classmethod
+    def _normalize_upload_folder(cls, v: str) -> str:
+        return v.rstrip("/")
+
+    # Listas derivadas
     @property
     def cors_origins_list(self) -> List[str]:
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
-    
+        if not self.CORS_ORIGINS.strip():
+            return []
+        return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
     @property
     def allowed_extensions_list(self) -> List[str]:
-        return [ext.strip() for ext in self.ALLOWED_EXTENSIONS.split(",")]
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "allow"  # Permitir campos extra para compatibilidad
+        return [ext.strip().lower() for ext in self.ALLOWED_EXTENSIONS.split(",") if ext.strip()]
 
-# Instancia global de configuración
+    # URL de conexión (escapa la contraseña por seguridad)
+    @property
+    def DATABASE_URL(self) -> str:
+        host = self.DB_HOST or self._DB_HOST_ALT or ""
+        port = int(self.DB_PORT or self._DB_PORT_ALT or 16751)
+        name = self.DB_NAME or self._DB_NAME_ALT or ""
+        user = self.DB_USER or self._DB_USER_ALT or ""
+        pwd = self.DB_PASSWORD.get_secret_value() or (self._DB_PASS_ALT or "")
+        return f"mysql+pymysql://{user}:{quote_plus(pwd)}@{host}:{port}/{name}"
+
+
 settings = Settings()
 
-# Crear carpeta de uploads si no existe
-os.makedirs(settings.UPLOAD_FOLDER, exist_ok=True) 
+# Crea carpeta de subidas si no existe
+Path(settings.UPLOAD_FOLDER).mkdir(parents=True, exist_ok=True)
