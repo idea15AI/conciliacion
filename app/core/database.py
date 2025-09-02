@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
 import logging
 
-from app.core.config import settings
+from app.core.settings import settings
 
 # Configurar logging
 logging.basicConfig(level=settings.LOG_LEVEL)
