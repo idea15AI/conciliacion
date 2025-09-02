@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import threading
 from collections import defaultdict, deque
 
-from app.core.config import settings
+from app.core.settings import settings
 
 class PerformanceMonitor:
     """

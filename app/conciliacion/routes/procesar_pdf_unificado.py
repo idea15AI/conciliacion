@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.conciliacion.services.archivo_bancario_service import ArchivoBancarioService
 from app.conciliacion.schemas import ArchivoBancarioResponse
-from app.core.config import settings
+from app.core.settings import settings
 
 logger = logging.getLogger(__name__)
 

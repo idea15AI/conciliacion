@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     
     # Verificar configuración de Gemini
     try:
-        from app.core.config import settings
+        from app.core.settings import settings
         gemini_key = settings.GEMINI_API_KEY
         logger.info(f"🔧 Verificando configuración de Gemini...")
         logger.info(f"🔑 GEMINI_API_KEY configurada: {'Sí' if gemini_key else 'No'}")
