@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     UPLOAD_FOLDER: str = "uploads"
     ALLOWED_EXTENSIONS: str = "pdf"
 
+    # === Logging ===
+    LOG_LEVEL: str = "INFO"  # INFO, DEBUG, WARNING, ERROR, CRITICAL
+
     # Config de Pydantic Settings v2
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -68,6 +71,12 @@ class Settings(BaseSettings):
             f"mysql+pymysql://{self.DB_USER}:{quote_plus(self.DB_PASSWORD.get_secret_value())}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
         )
+
+    # Nivel numérico para logging.basicConfig
+    @property
+    def LOG_LEVEL_NUM(self) -> int:
+        import logging
+        return getattr(logging, str(self.LOG_LEVEL).upper(), logging.INFO)
 
 
 settings = Settings()
