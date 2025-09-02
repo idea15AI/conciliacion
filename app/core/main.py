@@ -12,7 +12,7 @@ import logging
 import time
 from datetime import datetime
 
-from app.core.config import settings
+from app.core.settings import settings
 from app.core.database import test_db_connection, init_db
 
 # Simple response models
