@@ -87,7 +87,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://conciliaci-n-front.vercel.app"
+        "https://conciliaci-n-front.vercel.app",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "https://localhost:3000",
@@ -237,8 +237,8 @@ async def get_app_info():
         "max_file_size": settings.MAX_FILE_SIZE,
         "allowed_extensions": settings.allowed_extensions_list,
         "cors_origins": [
-            "https://conciliaci-n-front.vercel.app"
-        "http://localhost:3000",
+            "https://conciliaci-n-front.vercel.app",
+            "http://localhost:3000",
             "http://127.0.0.1:3000",
             "https://localhost:3000",
             *settings.cors_origins_list,
